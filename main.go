@@ -33,8 +33,11 @@ import (
 //go:embed index.html app.js styles.css
 var web embed.FS
 
+//go:embed brand/*.png
+var brandLogos embed.FS
+
 // version is increased on every change.
-const version = "1.0.20"
+const version = "1.0.23"
 
 // probeVer invalidates cached probes when the stored shape changes.
 const probeVer = 2
@@ -593,6 +596,10 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s - %s %s blocked", clientIP(r), r.Method, r.URL.RequestURI())
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/brand/") && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		serveBrand(w, r.URL.Path)
+		return
+	}
 	if u := currentUser(r); u != nil && u.MustChangePassword && !passwordChangeExempt(r) {
 		log.Printf("%s - %s %s blocked until password change", clientIP(r), r.Method, r.URL.RequestURI())
 		writeAPIError(w, http.StatusForbidden, "password_change_required")
@@ -809,6 +816,22 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+func serveBrand(w http.ResponseWriter, path string) {
+	name := strings.TrimPrefix(path, "/brand/")
+	if name == "" || strings.Contains(name, "/") || !strings.HasSuffix(name, ".png") {
+		http.NotFound(w, nil)
+		return
+	}
+	data, err := brandLogos.ReadFile("brand/" + name)
+	if err != nil {
+		http.NotFound(w, nil)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(data)
 }
 
 func serveStatic(w http.ResponseWriter, name, contentType string) {
