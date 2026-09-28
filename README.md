@@ -1,74 +1,8 @@
 # gomoov
 
-<p align="center">
-  <img src="docs/logos/brutalist.jpg" alt="gomoov" width="520">
-</p>
+![gomoov](docs/logos/brutalist.jpg)
 
 gomoov is a local web player for the video files in a folder. A normal launch is that player. Accounts, uploads, and private videos are there when you start it with `--user-mode`.
-
-## Screenshots
-
-These are the real player, opened on a folder of short generated clips.
-
-<p>
-  <img src="docs/screenshots/library.png" alt="Library, Continue watching, and Recently added" width="780">
-</p>
-
-The home page sorts by latest and keeps Continue watching and Recently added above the library.
-
-<p>
-  <img src="docs/screenshots/player.png" alt="Player controls and Up next" width="780">
-</p>
-
-Playback keeps the controls on the picture, with Up next beside it.
-
-<p>
-  <img src="docs/screenshots/phone.png" alt="The library on a phone" width="320">
-</p>
-
-The phone layout uses the same shelves in a single column.
-
-<p>
-  <img src="docs/screenshots/my-videos.png" alt="Watch later and an upload in My videos" width="780">
-</p>
-
-Watch later lives in Settings, on My videos, next to uploads. From there you can download a file or hand it to another account.
-
-## Themes
-
-The mark is the brutalist film gate: black ink, a hazard beam, and the name stamped on it. In the player that beam takes the theme color.
-
-<p>
-  <img src="docs/logos/brutalist-dark.jpg" alt="Dark" width="240">
-  <img src="docs/logos/brutalist-white.jpg" alt="White" width="240">
-  <img src="docs/logos/brutalist-cyber-green.jpg" alt="Cyber green" width="240">
-  <img src="docs/logos/brutalist-fancy.jpg" alt="Fancy" width="240">
-  <img src="docs/logos/brutalist-neon.jpg" alt="Neon" width="240">
-  <img src="docs/logos/brutalist-cyberpunk.jpg" alt="Cyberpunk" width="240">
-  <img src="docs/logos/brutalist-retro.jpg" alt="Retro" width="240">
-  <img src="docs/logos/brutalist-ocean.jpg" alt="Ocean" width="240">
-  <img src="docs/logos/brutalist-sunset.jpg" alt="Sunset" width="240">
-</p>
-
-These are the same generated library in every theme.
-
-<table>
-<tr>
-<td><img src="docs/screenshots/theme-dark.png" alt="Dark theme" width="360"><br>Dark</td>
-<td><img src="docs/screenshots/theme-white.png" alt="White theme" width="360"><br>White</td>
-<td><img src="docs/screenshots/theme-cyber-green.png" alt="Cyber green theme" width="360"><br>Cyber green</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/theme-fancy.png" alt="Fancy theme" width="360"><br>Fancy</td>
-<td><img src="docs/screenshots/theme-neon.png" alt="Neon theme" width="360"><br>Neon</td>
-<td><img src="docs/screenshots/theme-cyberpunk.png" alt="Cyberpunk theme" width="360"><br>Cyberpunk</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/theme-retro.png" alt="Retro theme" width="360"><br>Retro</td>
-<td><img src="docs/screenshots/theme-ocean.png" alt="Ocean theme" width="360"><br>Ocean</td>
-<td><img src="docs/screenshots/theme-sunset.png" alt="Sunset theme" width="360"><br>Sunset</td>
-</tr>
-</table>
 
 The page, script, and stylesheet are built into the `gomoov` binary. Playback uses `ffmpeg` and `ffprobe`. A normal build uses the ones on `PATH`. `make with-ffmpeg` downloads a static GPL build and packs both programs into the binary so the machine does not need them installed.
 
@@ -271,3 +205,23 @@ go test ./...
 ```
 
 The version in `main.go` increases on each change. Movies, torrents, and the built `gomoov` binary are not part of the git history.
+
+## Screenshots
+
+These are the real player, opened on a folder of short generated clips.
+
+![Library, Continue watching, and Recently added](docs/screenshots/library.png)
+
+The home page sorts by latest and keeps Continue watching and Recently added above the library.
+
+![Player controls and Up next](docs/screenshots/player.png)
+
+Playback keeps the controls on the picture, with Up next beside it.
+
+![The library on a phone](docs/screenshots/phone.png)
+
+The phone layout uses the same shelves in a single column.
+
+![Watch later and an upload in My videos](docs/screenshots/my-videos.png)
+
+Watch later lives in Settings, on My videos, next to uploads. From there you can download a file or hand it to another account.
