@@ -43,7 +43,7 @@ cd gomoov
 
 An archive without `-ffmpeg` is only the gomoov program. Put that file on your `PATH`. `ffmpeg` and `ffprobe` must already be installed.
 
-Then open a terminal in the movie folder and run `gomoov`. Add `-U` for accounts.
+Then open a terminal in the movie folder and run `gomoov`. Add `-U` for accounts. The first admin password is generated and printed once in the log. See [First password](#first-password).
 
 ## Optional bundled ffmpeg
 
@@ -87,7 +87,7 @@ gomoov -U
 gomoov --user-mode
 ```
 
-User mode is the account server. The first run creates `admin` / `admin` and asks for a new password before anything else. An existing install whose admin password is still `admin` is asked the same thing. An admin can add users, set a password, force a change at the next sign-in, allow or refuse uploads, open someone’s videos, and ban or delete an account. Ban and delete ask for confirmation. A banned person is signed out and cannot sign in. Deleting an account also deletes the videos in that person’s `~/gomoov/<id>/` folder. The admin account cannot be banned or deleted. Removing a video appends a line to `~/.gomoov/audit.log` with who deleted it, when, and the path.
+User mode is the account server. The first run creates `admin` with a generated password. See [First password](#first-password). An admin can add users, set a password, force a change at the next sign-in, allow or refuse uploads, open someone’s videos, and ban or delete an account. Ban and delete ask for confirmation. A banned person is signed out and cannot sign in. Deleting an account also deletes the videos in that person’s `~/gomoov/<id>/` folder. The admin account cannot be banned or deleted. Removing a video appends a line to `~/.gomoov/audit.log` with who deleted it, when, and the path.
 
 Private uploads are visible to their owner and to the admin. Other people, and anyone who is not signed in, see public videos only. In the simple player, private uploads stay hidden even for the owner. Add `--show-private` to include them for that launch:
 
@@ -105,6 +105,7 @@ gomoov --show-private
 | `-H`, `--host ADDR` | Listen address. Overrides `HOST`. Default `0.0.0.0` |
 | `-p`, `--port PORT` | Listen port. Overrides `PORT`. Default `8080` |
 | `-V`, `--version` | Print the version and exit |
+| `-R`, `--reset-password USER` | Set a one-time password for that account, print it in the log, and exit |
 | `-U`, `--user-mode` | Accounts, uploads, and the usual private-video rules |
 | `--show-private` | In the simple player, also show private uploads |
 | `-m`, `--movie PATH` | Open this video in a browser |
@@ -123,6 +124,31 @@ gomoov -m ~/videos/episode.mkv
 ```
 
 `~/gomoov` stays available either way: public uploads are listed, and private ones follow the rules above.
+
+## First password
+
+The first user-mode start creates the account `admin`. The password is random. gomoov prints it once in the log, and that sign-in has to choose a new password before the library opens:
+
+```text
+created admin account; one-time password: …
+```
+
+An older install whose admin password is still `admin` gets a new one-time password on the next start:
+
+```text
+replaced the admin password; one-time password: …
+```
+
+To set a new one-time password for any account:
+
+```bash
+gomoov -R admin
+gomoov --reset-password ada
+```
+
+gomoov prints `one-time password for USER: …` and exits. It does not start the player. Sign in with that password and choose a new one. A name that does not exist is an error, and the other accounts stay as they are.
+
+The line is on the terminal where you started gomoov. For the user service it is in `journalctl --user -u gomoov`. For Compose it is in `docker compose logs`.
 
 ## While you watch
 
@@ -188,7 +214,7 @@ LIBRARY_DIR=~/videos docker compose up --build -d
 UID="$(id -u)" GID="$(id -g)" LIBRARY_DIR=~/videos docker compose up --build -d
 ```
 
-Accounts and uploaded videos stay in the `gomoov-home` volume (`~/gomoov` and `~/.gomoov` inside the container). Open `http://127.0.0.1:8080`.
+Accounts and uploaded videos stay in the `gomoov-home` volume (`~/gomoov` and `~/.gomoov` inside the container). Open `http://127.0.0.1:8080`. The first start prints the admin one-time password in `docker compose logs`. See [First password](#first-password).
 
 A machine with VAAPI can pass the render device through. Add this under the `gomoov` service:
 
@@ -209,7 +235,7 @@ make install-user-service
 make install-user-service HOST=127.0.0.1 PORT=8090 LIBRARY=$HOME/videos
 ```
 
-The unit is `~/.config/systemd/user/gomoov.service`. It starts now and again at login. To keep it running when you are logged out:
+The unit is `~/.config/systemd/user/gomoov.service`. It starts now and again at login. The first start prints the admin one-time password in `journalctl --user -u gomoov`. To keep it running when you are logged out:
 
 ```bash
 loginctl enable-linger "$USER"

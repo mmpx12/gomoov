@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.28"
+const version = "1.0.29"
 
 // probeVer invalidates cached probes when the stored shape changes.
 const probeVer = 2
@@ -147,6 +147,7 @@ Flags:
   -H, --host ADDR            listen address (overrides HOST, default 0.0.0.0)
   -p, --port PORT            listen port (overrides PORT, default 8080)
   -V, --version              print version and exit
+  -R, --reset-password USER  set a one-time password for USER, print it, and exit
   -U, --user-mode            accounts, uploads, and private videos
       --show-private         in the simple player, also show private videos
   -m, --movie PATH           open this video in a browser
@@ -207,7 +208,7 @@ type probeEntry struct {
 }
 
 func main() {
-	var hostFlag, portFlag, movieFlag, libraryFlag string
+	var hostFlag, portFlag, movieFlag, libraryFlag, resetPassword string
 	var versionFlag, userModeFlag bool
 	var includes, excludes multiFlag
 
@@ -220,6 +221,8 @@ func main() {
 	flag.BoolVar(&versionFlag, "V", false, "print version and exit")
 	flag.BoolVar(&userModeFlag, "user-mode", false, "accounts, uploads, and private videos")
 	flag.BoolVar(&userModeFlag, "U", false, "accounts, uploads, and private videos")
+	flag.StringVar(&resetPassword, "reset-password", "", "set a one-time password for this account and exit")
+	flag.StringVar(&resetPassword, "R", "", "set a one-time password for this account and exit")
 	flag.BoolVar(&showPrivate, "show-private", false, "in the simple player, include private videos")
 	flag.StringVar(&movieFlag, "movie", "", "open this video in a browser")
 	flag.StringVar(&movieFlag, "m", "", "open this video in a browser")
@@ -238,6 +241,23 @@ func main() {
 	videoPlayer = !userModeFlag
 	if versionFlag {
 		fmt.Println("gomoov " + version)
+		return
+	}
+	if resetPassword != "" {
+		// Replacing admin would otherwise log a password that this flag
+		// immediately overwrites.
+		if strings.EqualFold(strings.TrimSpace(resetPassword), "admin") {
+			skipOneTimeLog = true
+		}
+		if err := initAuthPaths(); err != nil {
+			log.Fatal(err)
+		}
+		if err := setOneTimePassword(resetPassword); err != nil {
+			if skipOneTimeLog && oneTimePassword != "" {
+				log.Printf("created admin account; one-time password: %s", oneTimePassword)
+			}
+			log.Fatal(err)
+		}
 		return
 	}
 

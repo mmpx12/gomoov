@@ -38,11 +38,20 @@ func withAuth(t *testing.T) {
 	if err := loadAuth(); err != nil {
 		t.Fatal(err)
 	}
+	salt, hash, iter, err := hashPassword("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
 	authMu.Lock()
 	for i := range users {
+		if strings.EqualFold(users[i].Username, "admin") {
+			users[i].PassSalt = salt
+			users[i].PassHash = hash
+			users[i].PassIter = iter
+		}
 		users[i].MustChangePassword = false
 	}
-	err := saveUsersLocked()
+	err = saveUsersLocked()
 	authMu.Unlock()
 	if err != nil {
 		t.Fatal(err)
@@ -357,10 +366,10 @@ func TestFreshAdminMustChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin, ok := findUser("admin")
-	if !ok || !admin.MustChangePassword {
-		t.Fatalf("fresh admin must change password, got %+v", admin.MustChangePassword)
+	if !ok || !admin.MustChangePassword || oneTimePassword == "" || verifyPassword("admin", admin.PassSalt, admin.PassHash, admin.PassIter) {
+		t.Fatalf("fresh admin must change a generated password, got %+v", admin.MustChangePassword)
 	}
-	cookie := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": "admin"}, nil))
+	cookie := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": oneTimePassword}, nil))
 	blocked := sendJSON(http.MethodGet, "/api/users", nil, cookie)
 	if blocked.Code != http.StatusForbidden || !bytes.Contains(blocked.Body.Bytes(), []byte("password_change_required")) {
 		t.Fatalf("fresh admin library status %d %s", blocked.Code, blocked.Body.String())
@@ -373,20 +382,37 @@ func TestExistingAdminPasswordForcesChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin, ok := findUser("admin")
-	if !ok || !admin.MustChangePassword {
-		t.Fatal("existing admin/admin was not forced to change")
+	if !ok || !admin.MustChangePassword || oneTimePassword == "" || verifyPassword("admin", admin.PassSalt, admin.PassHash, admin.PassIter) {
+		t.Fatal("existing admin/admin was not replaced")
 	}
-	cookie := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": "admin"}, nil))
+	cookie := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": oneTimePassword}, nil))
 	blocked := sendJSON(http.MethodGet, "/api/users", nil, cookie)
 	if blocked.Code != http.StatusForbidden {
 		t.Fatalf("status %d %s", blocked.Code, blocked.Body.String())
 	}
-	changed := postJSON("/api/password", map[string]string{"current": "admin", "next": "better-pass"}, cookie)
+	changed := postJSON("/api/password", map[string]string{"current": oneTimePassword, "next": "better-pass"}, cookie)
 	if changed.Code != http.StatusOK {
 		t.Fatalf("change %d %s", changed.Code, changed.Body.String())
 	}
 	if rec := sendJSON(http.MethodGet, "/api/users", nil, cookie); rec.Code != http.StatusOK {
 		t.Fatalf("after change %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestResetPasswordFromCLI(t *testing.T) {
+	withAuth(t)
+	if err := setOneTimePassword("admin"); err != nil {
+		t.Fatal(err)
+	}
+	admin, ok := findUser("admin")
+	if !ok || !admin.MustChangePassword || !verifyPassword(oneTimePassword, admin.PassSalt, admin.PassHash, admin.PassIter) {
+		t.Fatal("reset did not set the one-time password")
+	}
+	if rec := postJSON("/api/login", map[string]string{"username": "admin", "password": "admin"}, nil); rec.Code == http.StatusOK {
+		t.Fatal("old password still works")
+	}
+	if err := setOneTimePassword("nobody"); err == nil {
+		t.Fatal("missing account was reset")
 	}
 }
 

@@ -1,3 +1,5 @@
+The first admin password is generated and printed once in the log. `gomoov -R USER` sets a new one-time password for that account and exits.
+
 ## Which file to download
 
 Pick the archive that matches your machine. A name ending in `-ffmpeg` already contains ffmpeg and ffprobe, plus `README.md` and an install script. The other files use `ffmpeg` and `ffprobe` that are already on your PATH.
@@ -27,4 +29,4 @@ cd gomoov
 .\install.ps1
 ```
 
-Then open a terminal in the movie folder and run `gomoov`. Add `-U` for accounts. The first account is `admin` / `admin`, and that password must be changed at the first sign-in.
+Then open a terminal in the movie folder and run `gomoov`. Add `-U` for accounts. The first run prints a one-time admin password in the log. Sign in with it and choose a new password. `gomoov -R admin` prints a new one-time password and exits.

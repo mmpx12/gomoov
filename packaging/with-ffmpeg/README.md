@@ -32,4 +32,4 @@ Open a terminal in the folder that contains your movies, then:
 gomoov
 ```
 
-Add `-U` for accounts, uploads, and private videos. The default address is `http://0.0.0.0:8080`. The first account is `admin` / `admin`, and that password must be changed at the first sign-in.
+Add `-U` for accounts, uploads, and private videos. The default address is `http://0.0.0.0:8080`. The first run prints a one-time admin password in the log. Sign in with it and choose a new password. `gomoov -R admin` prints a new one-time password and exits.

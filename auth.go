@@ -105,9 +105,14 @@ func loadAuth() error {
 	var salt, hash string
 	var iter int
 	var id string
+	var freshPassword string
 	if fresh {
 		var err error
-		salt, hash, iter, err = hashPassword("admin")
+		freshPassword, err = generatePassword()
+		if err != nil {
+			return err
+		}
+		salt, hash, iter, err = hashPassword(freshPassword)
 		if err != nil {
 			return err
 		}
@@ -116,13 +121,25 @@ func loadAuth() error {
 			return err
 		}
 	}
-	// Password checks stay outside authMu. The default admin password is
-	// still "admin" on older installs, and those accounts must change it.
-	forceDefault := false
-	for _, u := range loaded {
-		if strings.EqualFold(u.Username, "admin") && verifyPassword("admin", u.PassSalt, u.PassHash, u.PassIter) {
-			forceDefault = true
-			break
+	// An older install may still have admin/admin. Replace that password
+	// outside the lock. The new password is printed once and must be changed.
+	var replacedPassword string
+	var replacedSalt, replacedHash string
+	var replacedIter int
+	if !fresh {
+		for _, u := range loaded {
+			if strings.EqualFold(u.Username, "admin") && verifyPassword("admin", u.PassSalt, u.PassHash, u.PassIter) {
+				var err error
+				replacedPassword, err = generatePassword()
+				if err != nil {
+					return err
+				}
+				replacedSalt, replacedHash, replacedIter, err = hashPassword(replacedPassword)
+				if err != nil {
+					return err
+				}
+				break
+			}
 		}
 	}
 	sessionsLoaded := map[string]sessionRecord{}
@@ -158,26 +175,105 @@ func loadAuth() error {
 		if err := saveUsersLocked(); err != nil {
 			return err
 		}
-		log.Printf("created default admin account admin / admin; a new password is required")
-	} else if forceDefault {
-		changed := false
+		oneTimePassword = freshPassword
+		if !skipOneTimeLog {
+			log.Printf("created admin account; one-time password: %s", freshPassword)
+		}
+	} else if replacedPassword != "" {
+		var id string
 		for i := range users {
-			if strings.EqualFold(users[i].Username, "admin") && !users[i].MustChangePassword {
+			if strings.EqualFold(users[i].Username, "admin") {
+				users[i].PassSalt = replacedSalt
+				users[i].PassHash = replacedHash
+				users[i].PassIter = replacedIter
 				users[i].MustChangePassword = true
-				changed = true
+				id = users[i].ID
 			}
 		}
-		if changed {
-			if err := saveUsersLocked(); err != nil {
-				return err
+		for token, sess := range sessions {
+			if sess.UserID == id {
+				delete(sessions, token)
 			}
-			log.Printf("admin password is still admin; a new password is required")
+		}
+		if err := saveUsersLocked(); err != nil {
+			return err
+		}
+		oneTimePassword = replacedPassword
+		if !skipOneTimeLog {
+			log.Printf("replaced the admin password; one-time password: %s", replacedPassword)
 		}
 	}
 	for _, u := range users {
 		_ = os.MkdirAll(filepath.Join(uploadRoot, u.ID), 0o700)
 	}
 	return saveSessionsLocked()
+}
+
+// oneTimePassword is the last password generated for a new or reset account.
+// It is also written to the log once.
+var oneTimePassword string
+
+// skipOneTimeLog is set when -R admin is about to replace the password
+// loadAuth just created. The flag prints the password that actually works.
+var skipOneTimeLog bool
+
+func generatePassword() (string, error) {
+	const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	buf := make([]byte, 20)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	for i := range buf {
+		buf[i] = alphabet[int(buf[i])%len(alphabet)]
+	}
+	return string(buf), nil
+}
+
+func setOneTimePassword(username string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return errors.New("username required")
+	}
+	password, err := generatePassword()
+	if err != nil {
+		return err
+	}
+	salt, hash, iter, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	authMu.Lock()
+	defer authMu.Unlock()
+	found := false
+	var id string
+	for i := range users {
+		if strings.EqualFold(users[i].Username, username) {
+			users[i].PassSalt = salt
+			users[i].PassHash = hash
+			users[i].PassIter = iter
+			users[i].MustChangePassword = true
+			id = users[i].ID
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("no account named %s", username)
+	}
+	for token, sess := range sessions {
+		if sess.UserID == id {
+			delete(sessions, token)
+		}
+	}
+	if err := saveUsersLocked(); err != nil {
+		return err
+	}
+	if err := saveSessionsLocked(); err != nil {
+		return err
+	}
+	oneTimePassword = password
+	log.Printf("one-time password for %s: %s", username, password)
+	return nil
 }
 
 func hashPassword(password string) (saltHex, hashHex string, iter int, err error) {
