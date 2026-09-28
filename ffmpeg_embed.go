@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 //go:embed build/ffmpeg/ffmpeg build/ffmpeg/ffprobe
@@ -25,11 +26,11 @@ func prepareFFmpeg() error {
 	if err != nil {
 		return err
 	}
-	ffmpegPath, err := writeTool(dir, "ffmpeg", ffmpegData)
+	ffmpegPath, err := writeTool(dir, embeddedToolName("ffmpeg"), ffmpegData)
 	if err != nil {
 		return err
 	}
-	ffprobePath, err := writeTool(dir, "ffprobe", ffprobeData)
+	ffprobePath, err := writeTool(dir, embeddedToolName("ffprobe"), ffprobeData)
 	if err != nil {
 		return err
 	}
@@ -37,4 +38,11 @@ func prepareFFmpeg() error {
 	ffprobeBin = ffprobePath
 	log.Printf("using embedded ffmpeg from %s", dir)
 	return nil
+}
+
+func embeddedToolName(base string) string {
+	if runtime.GOOS == "windows" {
+		return base + ".exe"
+	}
+	return base
 }

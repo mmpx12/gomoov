@@ -9,8 +9,30 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ffmpeg: ffmpeg-master-latest-linux64-gpl.tar.xz
+          - goos: linux
+            goarch: arm64
+            ffmpeg: ffmpeg-master-latest-linuxarm64-gpl.tar.xz
+          - goos: windows
+            goarch: amd64
+            ffmpeg: ffmpeg-master-latest-win64-gpl.zip
+          - goos: windows
+            goarch: arm64
+            ffmpeg: ffmpeg-master-latest-winarm64-gpl.zip
+          - goos: darwin
+            goarch: amd64
+            ffmpeg: ""
+          - goos: darwin
+            goarch: arm64
+            ffmpeg: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -19,15 +41,62 @@ jobs:
           go-version: "1.22"
 
       - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          FFMPEG_ASSET: ${{ matrix.ffmpeg }}
         run: |
+          set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/gomoov-linux-amd64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/gomoov-linux-arm64 .
-          make fetch-ffmpeg
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embedffmpeg -o dist/gomoov-linux-amd64-ffmpeg .
+          ext=""
+          if [ "$GOOS" = "windows" ]; then
+            ext=".exe"
+          fi
+          CGO_ENABLED=0 go build -o "dist/gomoov-${GOOS}-${GOARCH}${ext}" .
 
-      - name: Publish
-        uses: softprops/action-gh-release@v2
+          if [ -z "$FFMPEG_ASSET" ]; then
+            exit 0
+          fi
+          mkdir -p build/ffmpeg-src build/ffmpeg
+          curl -fL --retry 3 -o /tmp/ffmpeg-archive \
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${FFMPEG_ASSET}"
+          case "$FFMPEG_ASSET" in
+            *.tar.xz)
+              tar -xJf /tmp/ffmpeg-archive -C build/ffmpeg-src --strip-components=1
+              ;;
+            *.zip)
+              unzip -q /tmp/ffmpeg-archive -d build/ffmpeg-src
+              if [ ! -d build/ffmpeg-src/bin ]; then
+                top="$(find build/ffmpeg-src -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+                mv "$top"/* build/ffmpeg-src/
+              fi
+              ;;
+          esac
+          if [ -f build/ffmpeg-src/bin/ffmpeg.exe ]; then
+            cp build/ffmpeg-src/bin/ffmpeg.exe build/ffmpeg/ffmpeg
+            cp build/ffmpeg-src/bin/ffprobe.exe build/ffmpeg/ffprobe
+          else
+            cp build/ffmpeg-src/bin/ffmpeg build/ffmpeg/ffmpeg
+            cp build/ffmpeg-src/bin/ffprobe build/ffmpeg/ffprobe
+          fi
+          chmod 755 build/ffmpeg/ffmpeg build/ffmpeg/ffprobe
+          CGO_ENABLED=0 go build -tags embedffmpeg -o "dist/gomoov-${GOOS}-${GOARCH}-ffmpeg${ext}" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gomoov-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           fail_on_unmatched_files: true

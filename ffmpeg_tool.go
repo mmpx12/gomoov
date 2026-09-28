@@ -86,7 +86,7 @@ func writeTool(dir, name string, data []byte) (string, error) {
 	sum := sha256.Sum256(data)
 	stamp := hex.EncodeToString(sum[:])
 	if old, err := os.ReadFile(dest + ".sha"); err == nil && string(old) == stamp {
-		if st, err := os.Stat(dest); err == nil && st.Mode()&0o111 != 0 {
+		if _, err := os.Stat(dest); err == nil {
 			return dest, nil
 		}
 	}
