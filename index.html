@@ -170,6 +170,15 @@
       </form>
     </section>
     <section id="settings-videos" data-settings-panel="videos" hidden>
+      <section id="later-section" class="shelf">
+        <button type="button" id="later-toggle" class="shelf-toggle" aria-expanded="true">
+          <span class="shelf-chevron" aria-hidden="true"></span>
+          <h2>Watch later</h2>
+        </button>
+        <div class="shelf-tone" aria-hidden="true"></div>
+        <div id="later-row" class="row"></div>
+        <p id="later-empty" class="empty" hidden>Nothing in Watch later.</p>
+      </section>
       <p class="modal-path">Videos you uploaded. Download keeps the original file. Hand over moves it to another account.</p>
       <div id="settings-video-list"></div>
     </section>
@@ -322,13 +331,6 @@
         My videos
       </label>
     </div>
-    <section id="later-section" class="shelf" hidden>
-      <button type="button" id="later-toggle" class="shelf-toggle" aria-expanded="true">
-        <span class="shelf-chevron" aria-hidden="true"></span>
-        <h2>Watch later</h2>
-      </button>
-      <div id="later-row" class="row"></div>
-    </section>
     <section id="continue-section" class="shelf" hidden>
       <button type="button" id="continue-toggle" class="shelf-toggle" aria-expanded="true">
         <span class="shelf-chevron" aria-hidden="true"></span>

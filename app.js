@@ -384,6 +384,26 @@ function cardActions(item, mode) {
   return '<div class="card-actions">' + button + "</div>";
 }
 
+function watchLaterItems() {
+  const byKey = new Map(catalog.map((item) => [watchKey(item), item]));
+  const later = [];
+  for (const key of watchLaterIDs()) {
+    const item = byKey.get(key);
+    if (item) later.push(item);
+  }
+  return later;
+}
+
+function renderWatchLater() {
+  const later = watchLaterItems();
+  laterSection.classList.toggle("collapsed", laterCollapsed);
+  document.getElementById("later-toggle").setAttribute("aria-expanded", laterCollapsed ? "false" : "true");
+  const empty = document.getElementById("later-empty");
+  laterRow.hidden = later.length === 0;
+  if (empty) empty.hidden = later.length !== 0;
+  laterRow.innerHTML = later.map((item) => cardHTML(item, "watchlater")).join("");
+}
+
 function watchLaterIDs() {
   try {
     const saved = JSON.parse(localStorage.getItem(WATCH_LATER));
@@ -581,22 +601,11 @@ function renderHome() {
       .sort((a, b) => (progress[progressKey(b)].at || 0) - (progress[progressKey(a)].at || 0))
     : [];
 
-  const later = [];
-  if (!q) {
-    const byKey = new Map(catalog.map((item) => [watchKey(item), item]));
-    for (const key of watchLaterIDs()) {
-      const item = byKey.get(key);
-      if (item) later.push(item);
-    }
-  }
   const recent = !q && seenLibrary
     ? catalog.filter((item) => (item.mtime || 0) > seenLibrary + 1).sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).slice(0, 24)
     : [];
 
-  laterSection.hidden = later.length === 0;
-  laterSection.classList.toggle("collapsed", laterCollapsed);
-  document.getElementById("later-toggle").setAttribute("aria-expanded", laterCollapsed ? "false" : "true");
-  laterRow.innerHTML = later.map((item) => cardHTML(item, "watchlater")).join("");
+  renderWatchLater();
 
   continueSection.hidden = continuing.length === 0;
   continueSection.classList.toggle("collapsed", continueCollapsed);
@@ -2663,6 +2672,7 @@ function renderAdminVideos() {
 }
 
 function renderSettingsVideos() {
+  renderWatchLater();
   const host = document.getElementById("settings-video-list");
   const mine = catalog.filter((item) => item.mine);
   if (!mine.length) {

@@ -702,6 +702,29 @@ label.check,
 
 .shelf { margin-bottom: 28px; }
 
+#later-section {
+  background: var(--elev);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 12px 4px;
+}
+
+#later-section .shelf-tone {
+  display: none;
+  height: 14px;
+  margin: 0 0 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--elev) 58%, var(--text));
+}
+
+#later-section.collapsed {
+  background: color-mix(in srgb, var(--elev) 74%, var(--bg));
+}
+
+#later-section.collapsed .shelf-tone { display: block; }
+
+#later-section.collapsed .shelf-toggle { margin-bottom: 8px; }
+
 h1, h2 { font-weight: 600; letter-spacing: -0.02em; }
 
 h2 {

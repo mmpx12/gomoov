@@ -93,7 +93,7 @@ gomoov -m ~/videos/episode.mkv
 
 The home page opens sorted by latest. It can also sort by name, longest, size, or path, and can group a path sort into collapsible folders. Refresh checks the folder for new files and probes a file again only when its size or modification time changed. Continue watching is shared across every folder where gomoov is launched, and a movie is listed only when that file is in the current library. Resume is stored by absolute path in `~/.gomoov/progress.json`.
 
-**Watch later** is a separate list in this browser. It does not start playback. **Recently added** shows files that arrived since the last visit.
+**Watch later** is a separate list in this browser, under Settings → My videos. It does not start playback. **Recently added** shows files that arrived since the last visit.
 
 A copied H.264 stream starts at the previous keyframe. The player says when that is earlier than the time you asked for. Changing quality keeps the current picture up until the new stream has a frame. If several videos need encoding at once, extra ones wait and the player says so. VAAPI or NVENC is used for that encode when the machine has it; burned-in subtitles and a smaller picture stay on libx264.
 
