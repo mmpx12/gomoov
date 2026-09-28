@@ -4,7 +4,6 @@ FROM golang:1.22-bookworm AS build
 WORKDIR /src
 COPY go.mod ./
 COPY *.go index.html app.js styles.css ./
-COPY brand ./brand
 RUN CGO_ENABLED=0 go build -o /out/gomoov .
 
 FROM debian:bookworm-slim
