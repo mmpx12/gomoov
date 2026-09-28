@@ -91,7 +91,7 @@ gomoov -m ~/videos/episode.mkv
 
 ## While you watch
 
-The home page can sort by name, newest, longest, size, or path, and can group a path sort into collapsible folders. Refresh checks the folder for new files and probes a file again only when its size or modification time changed. Continue watching is shared across every folder where gomoov is launched, and a movie is listed only when that file is in the current library. Resume is stored by absolute path in `~/.gomoov/progress.json`.
+The home page opens sorted by latest. It can also sort by name, longest, size, or path, and can group a path sort into collapsible folders. Refresh checks the folder for new files and probes a file again only when its size or modification time changed. Continue watching is shared across every folder where gomoov is launched, and a movie is listed only when that file is in the current library. Resume is stored by absolute path in `~/.gomoov/progress.json`.
 
 **Watch later** is a separate list in this browser. It does not start playback. **Recently added** shows files that arrived since the last visit.
 

@@ -669,17 +669,36 @@ label.check,
 
 .folder-body > .shelf { margin-left: 14px; }
 
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.card-action {
+  background: var(--elev);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.card-action:hover { border-color: var(--accent); }
+
 .continue-remove {
-  margin-top: 6px;
-  padding: 0;
+  display: block;
+  margin: 0;
+  padding: 6px 10px;
   border: 0;
+  border-radius: inherit;
   background: transparent;
-  color: var(--muted);
+  color: inherit;
   font-size: 0.82rem;
   cursor: pointer;
 }
 
-.continue-remove:hover { color: var(--text); }
+.continue-remove:hover { color: var(--accent); }
 
 .shelf { margin-bottom: 28px; }
 
@@ -1510,7 +1529,7 @@ h1 {
 
   #view-home .shelf-toggle h2 { padding: 0; }
 
-  #view-home .continue-remove { margin: 0 12px 8px; }
+  #view-home .card-actions { margin: 8px 12px 10px; gap: 10px; }
 
   #view-home .grid {
     grid-template-columns: 1fr;

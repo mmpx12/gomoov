@@ -68,8 +68,8 @@ const playerRetry = document.getElementById("player-retry");
 
 let catalog = [];
 let me = null;
-let sortKey = "name";
-let sortDesc = false;
+let sortKey = "newest";
+let sortDesc = true;
 let groupByFolder = false;
 let mineOnly = false;
 let videoPlayer = false;
@@ -307,6 +307,22 @@ function metaLine(item) {
   return [item.quality, item.edition, item.sizeLabel].filter(Boolean).join(" · ");
 }
 
+function relativeAge(mtime) {
+  const then = Number(mtime);
+  if (!then) return "";
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - then));
+  if (seconds < 45) return "now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + "m ago";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + "h ago";
+  const days = Math.floor(hours / 24);
+  if (days < 30) return days + "d ago";
+  const months = Math.floor(days / 30);
+  if (months < 12) return months + "mo ago";
+  return Math.max(1, Math.floor(days / 365)) + "y ago";
+}
+
 function progressRatio(item) {
   const saved = entryFor(item);
   if (!saved || saved.done || !saved.dur || saved.t < 5) return 0;
@@ -321,6 +337,9 @@ function cardHTML(item, mode) {
   if (mode === "continue" && saved && !saved.done) {
     const left = Math.max(0, (saved.dur || item.duration) - saved.t);
     sub = formatTime(left) + " left";
+  } else {
+    const age = relativeAge(item.mtime);
+    if (age) sub = [sub, age].filter(Boolean).join(" · ");
   }
   const hue = hueOf(item.fullTitle);
   const href = "#/watch?v=" + encodeURIComponent(item.path);
@@ -342,10 +361,12 @@ function cardHTML(item, mode) {
         '<button type="button" class="info-btn" data-info data-path="' + esc(item.path) + '" aria-label="Info for ' + esc(title) + '">i</button>' +
       "</div>" +
       (sub ? '<div class="card-meta">' + esc(sub) + "</div>" : "") +
-      (mode === "continue" ? '<button type="button" class="continue-remove" data-continue-remove data-path="' + esc(item.path) + '">Remove from list</button>' : "") +
-      '<button type="button" class="continue-remove" data-watch-later data-path="' + esc(watchKey(item)) + '">' +
-        (mode === "watchlater" || inWatchLater(item) ? (mode === "watchlater" ? "Remove from Watch later" : "In Watch later") : "Watch later") +
-      "</button>" +
+      '<div class="card-actions">' +
+        (mode === "continue" ? '<div class="card-action"><button type="button" class="continue-remove" data-continue-remove data-path="' + esc(item.path) + '">Remove from list</button></div>' : "") +
+        '<div class="card-action"><button type="button" class="continue-remove" data-watch-later data-path="' + esc(watchKey(item)) + '">' +
+          (mode === "watchlater" || inWatchLater(item) ? (mode === "watchlater" ? "Remove from Watch later" : "In Watch later") : "Watch later") +
+        "</button></div>" +
+      "</div>" +
     "</article>"
   );
 }
@@ -412,7 +433,7 @@ function filtered() {
 
 const SORT_DIRS = {
   name: ["A to Z", "Z to A"],
-  newest: ["Oldest first", "Newest first"],
+  newest: ["Oldest first", "Latest first"],
   longest: ["Shortest first", "Longest first"],
   size: ["Smallest first", "Largest first"],
   path: ["A to Z", "Z to A"]
@@ -434,17 +455,19 @@ function syncMineControl() {
 function loadSort() {
   try {
     const saved = JSON.parse(localStorage.getItem(SORT_STORE)) || {};
-    if (SORT_DIRS[saved.key]) sortKey = saved.key;
-    sortDesc = !!saved.desc;
-    groupByFolder = !!saved.group;
+    if (saved.v === 2 && SORT_DIRS[saved.key]) {
+      sortKey = saved.key;
+      sortDesc = !!saved.desc;
+      groupByFolder = !!saved.group;
+    }
   } catch {
-    sortKey = "name";
-    sortDesc = false;
+    sortKey = "newest";
+    sortDesc = true;
   }
 }
 
 function saveSort() {
-  localStorage.setItem(SORT_STORE, JSON.stringify({ key: sortKey, desc: sortDesc, group: groupByFolder }));
+  localStorage.setItem(SORT_STORE, JSON.stringify({ v: 2, key: sortKey, desc: sortDesc, group: groupByFolder }));
 }
 
 function syncSortControls() {
@@ -1552,6 +1575,12 @@ document.body.addEventListener("click", (event) => {
     event.stopPropagation();
     sendProgress(drop.dataset.path, null);
     renderHome();
+    return;
+  }
+  const actionPad = event.target.closest(".card-action");
+  if (actionPad && !event.target.closest("button")) {
+    const button = actionPad.querySelector("button");
+    if (button) button.click();
     return;
   }
   const laterBtn = event.target.closest("[data-watch-later]");
