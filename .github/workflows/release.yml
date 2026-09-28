@@ -81,18 +81,33 @@ jobs:
           CGO_ENABLED=0 go build -tags embedffmpeg -o "dist/gomoov-${GOOS}-${GOARCH}-ffmpeg${ext}" .
           fi
 
+          pack() {
+            bin="$1"
+            base="$(basename "$bin")"
+            stage="$(mktemp -d)"
+            if [[ "$base" == *-ffmpeg || "$base" == *-ffmpeg.exe ]]; then
+              mkdir -p "$stage/gomoov"
+              archive="$PWD/dist/${base}.zip"
+              if [ "$GOOS" = "windows" ]; then
+                cp "$bin" "$stage/gomoov/gomoov.exe"
+                cp packaging/with-ffmpeg/README.md packaging/with-ffmpeg/install.ps1 "$stage/gomoov/"
+                (cd "$stage" && zip -qr "$archive" gomoov)
+              else
+                cp "$bin" "$stage/gomoov/gomoov"
+                cp packaging/with-ffmpeg/README.md packaging/with-ffmpeg/install.sh "$stage/gomoov/"
+                chmod 755 "$stage/gomoov/gomoov" "$stage/gomoov/install.sh"
+                tar -C "$stage" -czf "dist/${base}.tar.gz" gomoov
+              fi
+            elif [ "$GOOS" = "windows" ]; then
+              (cd dist && zip -q "${base}.zip" "$base")
+            else
+              tar -C dist -czf "dist/${base}.tar.gz" "$base"
+            fi
+            rm -rf "$stage" "$bin"
+          }
           for bin in dist/*; do
             [ -f "$bin" ] || continue
-            base="$(basename "$bin")"
-            case "$base" in
-              *.exe)
-                (cd dist && zip -q "${base}.zip" "$base")
-                ;;
-              *)
-                tar -C dist -czf "dist/${base}.tar.gz" "$base"
-                ;;
-            esac
-            rm -f "$bin"
+            pack "$bin"
           done
 
       - uses: actions/upload-artifact@v6
@@ -104,6 +119,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v7
         with:
           path: dist
@@ -111,5 +128,6 @@ jobs:
 
       - uses: softprops/action-gh-release@v3
         with:
+          body_path: .github/release-notes.md
           files: dist/*
           fail_on_unmatched_files: true

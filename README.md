@@ -4,13 +4,46 @@
 
 gomoov is a local web player for the video files in a folder. A normal launch is that player. Accounts, uploads, and private videos are there when you start it with `--user-mode`.
 
-The page, script, and stylesheet are built into the `gomoov` binary. Playback uses `ffmpeg` and `ffprobe`. A normal build uses the ones on `PATH`. `make with-ffmpeg` downloads a static GPL build and packs both programs into the binary so the machine does not need them installed.
+The page, script, and stylesheet are built into the `gomoov` binary. Playback uses `ffmpeg` and `ffprobe`.
 
 ## Requirements
 
-- Go 1.22 or newer, to build
-- `ffmpeg` and `ffprobe` on `PATH`, unless you build with `make with-ffmpeg`
 - A browser on the machine that will watch
+- `ffmpeg` and `ffprobe`. Install them on the machine, or download a release archive whose name ends in `-ffmpeg`. That archive already contains both tools
+- Go 1.22 or newer, only if you build gomoov yourself
+
+## Install from a release
+
+Downloads are on the [latest release](https://github.com/mmpx12/gomoov/releases/latest). The notes there list every file. Linux and macOS files are `.tar.gz`. Windows files are `.zip`.
+
+| Machine | ffmpeg already installed | get ffmpeg from the release |
+| --- | --- | --- |
+| Linux x86_64 | `gomoov-linux-amd64.tar.gz` | `gomoov-linux-amd64-ffmpeg.tar.gz` |
+| Linux arm64 | `gomoov-linux-arm64.tar.gz` | `gomoov-linux-arm64-ffmpeg.tar.gz` |
+| Windows x86_64 | `gomoov-windows-amd64.exe.zip` | `gomoov-windows-amd64-ffmpeg.exe.zip` |
+| Windows arm64 | `gomoov-windows-arm64.exe.zip` | `gomoov-windows-arm64-ffmpeg.exe.zip` |
+| macOS Intel | `gomoov-darwin-amd64.tar.gz` | install ffmpeg yourself, then use the same file |
+| macOS Apple silicon | `gomoov-darwin-arm64.tar.gz` | install ffmpeg yourself, then use the same file |
+
+A `-ffmpeg` archive is the one to use when the machine has no ffmpeg. Unpack it and run the installer in that folder. The first launch of gomoov unpacks ffmpeg and ffprobe into `~/.gomoov/bin`.
+
+```bash
+tar -xzf gomoov-linux-amd64-ffmpeg.tar.gz
+cd gomoov
+./install.sh
+```
+
+```powershell
+Expand-Archive gomoov-windows-amd64-ffmpeg.exe.zip
+cd gomoov
+.\install.ps1
+```
+
+`./install.sh` copies `gomoov` to `~/.local/bin`. `PREFIX=/usr/local ./install.sh` uses another location. On Windows, `install.ps1` copies `gomoov.exe` to `%LOCALAPPDATA%\gomoov` and adds that folder to your user PATH.
+
+An archive without `-ffmpeg` is only the gomoov program. Put that file on your `PATH`. `ffmpeg` and `ffprobe` must already be installed.
+
+Then open a terminal in the movie folder and run `gomoov`. Add `-U` for accounts.
 
 ## Optional bundled ffmpeg
 
@@ -204,7 +237,7 @@ Stop a gomoov you started by hand before enabling either service. Both want port
 go test ./...
 ```
 
-A tag named `v1.*` builds a matrix of Linux, Windows, and macOS binaries and attaches compressed archives to that GitHub release. Linux and macOS archives are `.tar.gz`. Windows archives are `.zip`. Linux and Windows are published twice: `gomoov-<os>-<arch>` uses `ffmpeg` and `ffprobe` on `PATH`, and `gomoov-<os>-<arch>-ffmpeg` includes them. macOS builds are the PATH variant only.
+A tag named `v1.*` builds the release archives and attaches them to that GitHub release. The install steps are in [Install from a release](#install-from-a-release).
 
 The version in `main.go` increases on each change. Movies, torrents, and the built `gomoov` binary are not part of the git history.
 

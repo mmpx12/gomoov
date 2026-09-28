@@ -1,0 +1,30 @@
+## Which file to download
+
+Pick the archive that matches your machine. A name ending in `-ffmpeg` already contains ffmpeg and ffprobe, plus `README.md` and an install script. The other files use `ffmpeg` and `ffprobe` that are already on your PATH.
+
+| Machine | ffmpeg already installed | no ffmpeg to install |
+| --- | --- | --- |
+| Linux x86_64 | `gomoov-linux-amd64.tar.gz` | `gomoov-linux-amd64-ffmpeg.tar.gz` |
+| Linux arm64 | `gomoov-linux-arm64.tar.gz` | `gomoov-linux-arm64-ffmpeg.tar.gz` |
+| Windows x86_64 | `gomoov-windows-amd64.exe.zip` | `gomoov-windows-amd64-ffmpeg.exe.zip` |
+| Windows arm64 | `gomoov-windows-arm64.exe.zip` | `gomoov-windows-arm64-ffmpeg.exe.zip` |
+| macOS Intel | `gomoov-darwin-amd64.tar.gz` | install ffmpeg yourself, then use the same file |
+| macOS Apple silicon | `gomoov-darwin-arm64.tar.gz` | install ffmpeg yourself, then use the same file |
+
+Linux and macOS archives are `.tar.gz`. Windows archives are `.zip`.
+
+For a `-ffmpeg` archive, unpack it and run the script in that folder:
+
+```bash
+tar -xzf gomoov-linux-amd64-ffmpeg.tar.gz
+cd gomoov
+./install.sh
+```
+
+```powershell
+Expand-Archive gomoov-windows-amd64-ffmpeg.exe.zip
+cd gomoov
+.\install.ps1
+```
+
+Then open a terminal in the movie folder and run `gomoov`. Add `-U` for accounts. The first account is `admin` / `admin`, and that password must be changed at the first sign-in.
