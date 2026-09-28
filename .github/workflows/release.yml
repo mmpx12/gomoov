@@ -54,9 +54,7 @@ jobs:
           fi
           CGO_ENABLED=0 go build -o "dist/gomoov-${GOOS}-${GOARCH}${ext}" .
 
-          if [ -z "$FFMPEG_ASSET" ]; then
-            exit 0
-          fi
+          if [ -n "$FFMPEG_ASSET" ]; then
           mkdir -p build/ffmpeg-src build/ffmpeg
           curl -fL --retry 3 -o /tmp/ffmpeg-archive \
             "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${FFMPEG_ASSET}"
@@ -81,6 +79,21 @@ jobs:
           fi
           chmod 755 build/ffmpeg/ffmpeg build/ffmpeg/ffprobe
           CGO_ENABLED=0 go build -tags embedffmpeg -o "dist/gomoov-${GOOS}-${GOARCH}-ffmpeg${ext}" .
+          fi
+
+          for bin in dist/*; do
+            [ -f "$bin" ] || continue
+            base="$(basename "$bin")"
+            case "$base" in
+              *.exe)
+                (cd dist && zip -q "${base}.zip" "$base")
+                ;;
+              *)
+                tar -C dist -czf "dist/${base}.tar.gz" "$base"
+                ;;
+            esac
+            rm -f "$bin"
+          done
 
       - uses: actions/upload-artifact@v6
         with:
