@@ -21,12 +21,6 @@ jobs:
           - goos: linux
             goarch: arm64
             ffmpeg: ffmpeg-master-latest-linuxarm64-gpl.tar.xz
-          - goos: windows
-            goarch: amd64
-            ffmpeg: ffmpeg-master-latest-win64-gpl.zip
-          - goos: windows
-            goarch: arm64
-            ffmpeg: ffmpeg-master-latest-winarm64-gpl.zip
           - goos: darwin
             goarch: amd64
             ffmpeg: ""
