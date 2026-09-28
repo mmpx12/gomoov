@@ -78,7 +78,30 @@ gomoov -m ~/movies/episode.mkv
 
 The home page can sort by name, newest, longest, size, or path, and can group a path sort into collapsible folders. Refresh checks the folder for new files. Continue watching is shared across every folder where gomoov is launched, and a movie is listed only when that file is in the current library. Resume is stored by absolute path in `~/.gomoov/progress.json`.
 
-In user mode, **My videos** limits the home page to uploads from the signed-in account.
+The header and the browser tab say **gomoov**.
+
+In user mode, **My videos** limits the home page to uploads from the signed-in account. **Settings** has three tabs:
+
+- **Password** changes the account password.
+- **My videos** lists that account’s uploads and can remove one.
+- **Theme** picks a personal theme, or **Site default**.
+
+Themes are Dark (the default), White, Cyber green, Fancy, Neon, Cyberpunk, Retro, Ocean, and Sunset. Cyber green follows gonitor: a very dark background, yellow headings, green links, and a dark-green bar on the active menu item. A personal theme is stored on the account and wins over the site theme. **Site default** follows the theme saved in Admin.
+
+## Admin
+
+Sign in as an admin and open **Admin**.
+
+- **Users** adds accounts and opens one to set a password, allow uploads, ban, or delete. Ban and delete ask for confirmation.
+- **Videos** lists every title, with the owner’s username. A file from the launch folder is marked Library.
+- **Access** turns on HTTP basic auth and an IP allow list or exclude list.
+- **Theme** sets the site default.
+
+Basic auth asks the browser for a username and password before any page or video. It is separate from account sign-in. Leave the password blank when you save other access settings and the current basic-auth password stays.
+
+The IP rule is off, allow only the listed addresses, or exclude the listed addresses. A line can be one IP or a CIDR range such as `192.168.1.0/24`. `127.0.0.1` is always allowed. A save that would block the request you are making is refused.
+
+The site theme chosen here is the default for people who have not picked their own.
 
 ## Where files go
 

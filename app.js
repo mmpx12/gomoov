@@ -4,6 +4,7 @@ const STORAGE_KEY = "moovies.progress.v1";
 const VOLUME_KEY = "moovies.volume";
 const SORT_STORE = "moovies.sort";
 const MINE_ONLY = "moovies.mineOnly";
+const THEME_KEY = "moovies.theme";
 const CONTINUE_COLLAPSE = "moovies.continueCollapsed";
 const FOLDER_COLLAPSE = "moovies.folderCollapsed";
 const THEATER_KEY = "moovies.theater";
@@ -64,6 +65,7 @@ let sortDesc = false;
 let groupByFolder = false;
 let mineOnly = false;
 let videoPlayer = false;
+let siteTheme = "dark";
 let continueCollapsed = false;
 let current = null;
 let streamStart = 0;
@@ -571,9 +573,10 @@ function showHome() {
   current = null;
   viewWatch.hidden = true;
   viewLogin.hidden = true;
-  viewUsers.hidden = true;
+  viewAdmin.hidden = true;
+  viewSettings.hidden = true;
   viewHome.hidden = false;
-  document.title = "Moovies";
+  document.title = "gomoov";
   renderHome();
 }
 
@@ -701,7 +704,7 @@ function openVideo(item) {
   current = item;
   viewHome.hidden = true;
   viewWatch.hidden = false;
-  document.title = item.fullTitle + " · Moovies";
+  document.title = item.fullTitle + " · gomoov";
   watchTitle.textContent = item.fullTitle;
   const bits = [formatTime(item.duration), item.quality, item.edition, item.sizeLabel, item.private ? "Private" : ""].filter(Boolean);
   watchMeta.textContent = bits.join(" · ");
@@ -743,7 +746,7 @@ function route() {
     return;
   }
   const { pathname, video: path, user: userID } = parseRoute();
-  if (videoPlayer && (pathname === "/login" || pathname === "/users")) {
+  if (videoPlayer && (pathname === "/login" || pathname === "/users" || pathname === "/admin" || pathname === "/settings")) {
     location.hash = "/";
     return;
   }
@@ -755,13 +758,23 @@ function route() {
     showLogin();
     return;
   }
-  if (pathname === "/users") {
+  if (pathname === "/admin" || pathname === "/users") {
     if (!me || !me.admin) {
       location.hash = "/";
       return;
     }
+    const tab = userID ? "users" : (new URLSearchParams((location.hash.split("?")[1] || "")).get("tab") || "users");
+    showAdmin(tab);
     if (userID) showUser(userID);
-    else showUsers();
+    return;
+  }
+  if (pathname === "/settings") {
+    if (!me) {
+      location.hash = "/login";
+      return;
+    }
+    const tab = new URLSearchParams((location.hash.split("?")[1] || "")).get("tab") || "password";
+    showSettings(tab);
     return;
   }
   if (pathname === "/watch" && path) {
@@ -1713,7 +1726,8 @@ if (storedVolume !== null && !Number.isNaN(Number(storedVolume))) {
 }
 
 const viewLogin = document.getElementById("view-login");
-const viewUsers = document.getElementById("view-users");
+const viewAdmin = document.getElementById("view-admin");
+const viewSettings = document.getElementById("view-settings");
 
 function closeAccountMenu() {
   document.getElementById("account-menu").hidden = true;
@@ -1738,7 +1752,7 @@ function renderAccount() {
   button.textContent = me.username;
   upload.hidden = !me.canUpload;
   users.hidden = !me.admin;
-  users.textContent = me.admin && me.resetCount ? "Users (" + me.resetCount + ")" : "Users";
+  users.textContent = me.admin && me.resetCount ? "Admin (" + me.resetCount + ")" : "Admin";
   password.hidden = false;
   logout.hidden = false;
   syncMineControl();
@@ -1774,23 +1788,41 @@ function showLogin() {
   closeMenu();
   viewHome.hidden = true;
   viewWatch.hidden = true;
-  viewUsers.hidden = true;
+  viewAdmin.hidden = true;
+  viewSettings.hidden = true;
   viewLogin.hidden = false;
-  document.title = "Sign in · Moovies";
+  document.title = "Sign in · gomoov";
 }
 
-async function showUsers() {
+function showAdmin(tab) {
   closeAccountMenu();
   closeMenu();
   viewHome.hidden = true;
   viewWatch.hidden = true;
   viewLogin.hidden = true;
-  viewUsers.hidden = false;
-  document.getElementById("user-add").hidden = false;
-  document.getElementById("user-list").hidden = false;
-  document.getElementById("user-detail").hidden = true;
-  document.title = "Users · Moovies";
-  await renderUserList();
+  viewAdmin.hidden = false;
+  viewSettings.hidden = true;
+  document.querySelectorAll("[data-admin-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.adminPanel !== tab;
+  });
+  document.querySelectorAll("[data-admin-tab]").forEach((button) => {
+    button.setAttribute("aria-pressed", button.dataset.adminTab === tab ? "true" : "false");
+  });
+  document.title = "Admin · gomoov";
+  if (tab === "users") {
+    document.getElementById("user-add").hidden = false;
+    document.getElementById("user-list").hidden = false;
+    document.getElementById("user-detail").hidden = true;
+    renderUserList();
+  } else if (tab === "videos") {
+    renderAdminVideos();
+  } else if (tab === "access" || tab === "theme") {
+    loadAdminSettings();
+  }
+}
+
+async function showUsers() {
+  showAdmin("users");
 }
 
 async function showUser(id) {
@@ -1799,7 +1831,11 @@ async function showUser(id) {
   viewHome.hidden = true;
   viewWatch.hidden = true;
   viewLogin.hidden = true;
-  viewUsers.hidden = false;
+  viewAdmin.hidden = false;
+  viewSettings.hidden = true;
+  document.querySelectorAll("[data-admin-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.adminPanel !== "users";
+  });
   document.getElementById("user-add").hidden = true;
   document.getElementById("user-list").hidden = true;
   const detail = document.getElementById("user-detail");
@@ -1807,7 +1843,7 @@ async function showUser(id) {
   detail.dataset.user = id;
   closeUserConfirm();
   document.getElementById("user-detail-error").hidden = true;
-  document.title = "User · Moovies";
+  document.title = "User · gomoov";
   const response = await fetch("/api/users?id=" + encodeURIComponent(id));
   if (!response.ok) {
     document.getElementById("user-detail-name").textContent = "User";
@@ -1917,13 +1953,14 @@ document.getElementById("account-upload").addEventListener("click", () => {
 
 document.getElementById("account-users").addEventListener("click", () => {
   closeAccountMenu();
-  location.hash = "/users";
+  location.hash = "/admin";
   route();
 });
 
 document.getElementById("account-password").addEventListener("click", () => {
   closeAccountMenu();
-  showPasswordGate(false);
+  location.hash = "/settings";
+  route();
 });
 
 document.getElementById("account-logout").addEventListener("click", async () => {
@@ -2255,13 +2292,262 @@ document.body.addEventListener("click", (event) => {
   if (!event.target.closest("#account-menu") && !event.target.closest("#account-btn")) closeAccountMenu();
 });
 
+const THEMES = ["dark", "white", "cyber-green", "fancy", "neon", "cyberpunk", "retro", "ocean", "sunset"];
+
+function knownTheme(name) {
+  return THEMES.includes(name);
+}
+
+function effectiveTheme() {
+  const local = localStorage.getItem(THEME_KEY);
+  if (knownTheme(local)) return local;
+  if (me && knownTheme(me.theme)) return me.theme;
+  return knownTheme(siteTheme) ? siteTheme : "dark";
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = effectiveTheme();
+  const pick = document.getElementById("user-theme");
+  if (!pick) return;
+  const local = localStorage.getItem(THEME_KEY);
+  pick.value = knownTheme(local) ? local : (me && knownTheme(me.theme) ? me.theme : "");
+}
+
+function showSettings(tab) {
+  closeAccountMenu();
+  closeMenu();
+  viewHome.hidden = true;
+  viewWatch.hidden = true;
+  viewLogin.hidden = true;
+  viewAdmin.hidden = true;
+  viewSettings.hidden = false;
+  document.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== tab;
+  });
+  document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+    button.setAttribute("aria-pressed", button.dataset.settingsTab === tab ? "true" : "false");
+  });
+  document.title = "Settings · gomoov";
+  applyTheme();
+  if (tab === "videos") renderSettingsVideos();
+}
+
+async function loadSiteTheme() {
+  const response = await fetch("/api/settings");
+  if (!response.ok) return;
+  const data = await response.json();
+  if (knownTheme(data.theme)) siteTheme = data.theme;
+  applyTheme();
+}
+
+async function chooseTheme(theme) {
+  if (theme) localStorage.setItem(THEME_KEY, theme);
+  else localStorage.removeItem(THEME_KEY);
+  applyTheme();
+  if (!me) return;
+  const response = await fetch("/api/theme", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ theme })
+  });
+  if (response.ok) {
+    const data = await response.json();
+    if (data.user) me = data.user;
+  }
+  applyTheme();
+}
+
+function ownerLabel(item) {
+  if (item.ownerName) return item.ownerName;
+  if (item.ownerId) return item.ownerId;
+  return "Library";
+}
+
+function renderAdminVideos() {
+  const host = document.getElementById("admin-video-list");
+  if (!catalog.length) {
+    host.innerHTML = '<p class="empty">No videos.</p>';
+    return;
+  }
+  host.innerHTML = catalog.map((item) => (
+    '<article class="admin-video">' +
+      '<a href="#/watch?v=' + encodeURIComponent(item.path) + '" data-video="' + esc(item.path) + '">' + esc(item.fullTitle) + "</a>" +
+      '<span class="admin-owner">' + esc(ownerLabel(item)) + "</span>" +
+      "<span>" + (item.private ? "Private" : "Public") + "</span>" +
+      (item.canRemove ? '<button type="button" class="text-btn" data-admin-remove="' + esc(item.path) + '">Remove</button>' : "<span></span>") +
+    "</article>"
+  )).join("");
+}
+
+function renderSettingsVideos() {
+  const host = document.getElementById("settings-video-list");
+  const mine = catalog.filter((item) => item.mine);
+  if (!mine.length) {
+    host.innerHTML = '<p class="empty">You have not uploaded any videos.</p>';
+    return;
+  }
+  host.innerHTML = mine.map((item) => (
+    '<article class="admin-video">' +
+      '<a href="#/watch?v=' + encodeURIComponent(item.path) + '" data-video="' + esc(item.path) + '">' + esc(item.fullTitle) + "</a>" +
+      "<span>" + (item.private ? "Private" : "Public") + "</span>" +
+      '<button type="button" class="text-btn" data-settings-remove="' + esc(item.path) + '">Remove</button>' +
+    "</article>"
+  )).join("");
+}
+
+async function loadAdminSettings() {
+  const response = await fetch("/api/settings");
+  if (!response.ok) return;
+  const data = await response.json();
+  if (knownTheme(data.theme)) {
+    siteTheme = data.theme;
+    document.getElementById("admin-theme").value = data.theme;
+  }
+  document.getElementById("basic-on").checked = !!data.basicAuth;
+  document.getElementById("basic-user").value = data.basicUser || "";
+  document.getElementById("basic-pass").value = "";
+  document.getElementById("ip-mode").value = data.ipMode || "off";
+  document.getElementById("ip-list").value = (data.ips || []).join("\n");
+  applyTheme();
+}
+
+document.querySelector("#view-admin .admin-nav").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-admin-tab]");
+  if (!button) return;
+  const tab = button.dataset.adminTab;
+  if ((location.hash.split("?")[0] || "#/admin") !== "#/admin") location.hash = "/admin?tab=" + encodeURIComponent(tab);
+  else location.hash = "/admin?tab=" + encodeURIComponent(tab);
+});
+
+document.getElementById("admin-theme-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("theme-error");
+  error.hidden = true;
+  const response = await fetch("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ theme: document.getElementById("admin-theme").value })
+  });
+  if (!response.ok) {
+    error.textContent = await apiError(response);
+    error.hidden = false;
+    return;
+  }
+  const chosen = document.getElementById("admin-theme").value;
+  await loadAdminSettings();
+  if (document.getElementById("admin-theme").value !== chosen) {
+    error.textContent = "Could not save the theme.";
+    error.hidden = false;
+    return;
+  }
+  const saved = document.getElementById("theme-saved");
+  saved.textContent = "Saved. People who have not chosen a theme will see " + chosen + ".";
+  saved.hidden = false;
+  if (!localStorage.getItem(THEME_KEY) && !(me && knownTheme(me.theme))) applyTheme();
+});
+
+document.getElementById("admin-access-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("access-error");
+  error.hidden = true;
+  const response = await fetch("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      basicAuth: document.getElementById("basic-on").checked,
+      basicUser: document.getElementById("basic-user").value.trim(),
+      basicPassword: document.getElementById("basic-pass").value,
+      ipMode: document.getElementById("ip-mode").value,
+      ips: document.getElementById("ip-list").value.split(/[\s,]+/).filter(Boolean)
+    })
+  });
+  if (!response.ok) {
+    error.textContent = await apiError(response);
+    error.hidden = false;
+    return;
+  }
+  await loadAdminSettings();
+});
+
+document.querySelector("#view-settings .admin-nav").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-settings-tab]");
+  if (!button) return;
+  location.hash = "/settings?tab=" + encodeURIComponent(button.dataset.settingsTab);
+});
+
+document.getElementById("settings-password-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("settings-password-error");
+  error.hidden = true;
+  const next = document.getElementById("settings-new").value;
+  if (next !== document.getElementById("settings-confirm").value) {
+    error.textContent = "The new passwords do not match.";
+    error.hidden = false;
+    return;
+  }
+  const response = await fetch("/api/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      current: document.getElementById("settings-current").value,
+      next
+    })
+  });
+  if (!response.ok) {
+    error.textContent = await apiError(response);
+    error.hidden = false;
+    return;
+  }
+  const data = await response.json();
+  me = data.user || me;
+  if (me) me.mustChangePassword = false;
+  document.getElementById("settings-password-form").reset();
+  error.hidden = true;
+  document.getElementById("settings-password-error").hidden = true;
+  const note = document.getElementById("settings-password-error");
+  note.textContent = "Password saved.";
+  note.hidden = false;
+  note.style.color = "var(--muted)";
+});
+
+document.getElementById("settings-theme-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("settings-theme-error");
+  error.hidden = true;
+  await chooseTheme(document.getElementById("user-theme").value);
+  error.textContent = "Saved.";
+  error.hidden = false;
+  error.style.color = "var(--muted)";
+});
+
+document.getElementById("settings-video-list").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-settings-remove]");
+  if (!button) return;
+  const response = await fetch("/api/video?path=" + encodeURIComponent(button.dataset.settingsRemove), { method: "DELETE" });
+  if (!response.ok) return;
+  await loadCatalog();
+  renderSettingsVideos();
+});
+
+document.getElementById("admin-video-list").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-admin-remove]");
+  if (!button) return;
+  const response = await fetch("/api/video?path=" + encodeURIComponent(button.dataset.adminRemove), { method: "DELETE" });
+  if (!response.ok) return;
+  await loadCatalog();
+  renderAdminVideos();
+});
+
 async function init() {
   if (location.protocol === "file:") {
     setStatus("Open this page through the player. In the video folder, run ./gomoov and open the address it prints.");
     return;
   }
   try {
+    await loadSiteTheme();
+    applyTheme();
     await loadMe();
+    applyTheme();
     if (me && me.mustChangePassword) {
       showPasswordGate(true);
       return;

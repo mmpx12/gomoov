@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Moovies</title>
+  <title>gomoov</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='6' width='32' height='32' fill='%23ff0033'/%3E%3Cpath d='M12 9l12 7-12 7z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -14,7 +14,7 @@
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
       </span>
-      Moovies
+      gomoov
     </a>
     <button type="button" id="search-toggle" class="search-toggle" aria-label="Search">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -28,8 +28,8 @@
       <div id="account-menu" class="info-menu account-menu" hidden>
         <button type="button" id="account-upload">Upload</button>
         <button type="button" id="account-mine" hidden>My videos</button>
-        <button type="button" id="account-users" hidden>Users</button>
-        <button type="button" id="account-password" hidden>Change password</button>
+        <button type="button" id="account-users" hidden>Admin</button>
+        <button type="button" id="account-password" hidden>Settings</button>
         <button type="button" id="account-logout" hidden>Sign out</button>
       </div>
     </div>
@@ -146,9 +146,67 @@
     </form>
   </main>
 
-  <main id="view-users" class="page" hidden>
-    <h1>Users</h1>
-    <p class="modal-path">Only an admin can add accounts and set passwords. A reset request shows up here so you can set a new password and force a change at the next sign-in.</p>
+  <main id="view-settings" class="page" hidden>
+    <h1>Settings</h1>
+    <nav class="admin-nav section-nav" aria-label="Settings">
+      <button type="button" data-settings-tab="password">Password</button>
+      <button type="button" data-settings-tab="videos">My videos</button>
+      <button type="button" data-settings-tab="theme">Theme</button>
+    </nav>
+    <section id="settings-password" data-settings-panel="password">
+      <form id="settings-password-form" class="auth-card stack">
+        <h2>Change password</h2>
+        <label>Current password
+          <input id="settings-current" type="password" autocomplete="current-password" required>
+        </label>
+        <label>New password
+          <input id="settings-new" type="password" autocomplete="new-password" required>
+        </label>
+        <label>Confirm new password
+          <input id="settings-confirm" type="password" autocomplete="new-password" required>
+        </label>
+        <p id="settings-password-error" class="modal-error" hidden></p>
+        <button type="submit">Save password</button>
+      </form>
+    </section>
+    <section id="settings-videos" data-settings-panel="videos" hidden>
+      <p class="modal-path">Videos you uploaded.</p>
+      <div id="settings-video-list"></div>
+    </section>
+    <section id="settings-theme" data-settings-panel="theme" hidden>
+      <form id="settings-theme-form" class="auth-card stack">
+        <h2>Your theme</h2>
+        <p class="modal-path">This overrides the site theme on your account. Site default follows the theme chosen in Admin.</p>
+        <label>Theme
+          <select id="user-theme">
+            <option value="">Site default</option>
+            <option value="dark">Dark</option>
+            <option value="white">White</option>
+            <option value="cyber-green">Cyber green</option>
+            <option value="fancy">Fancy</option>
+            <option value="neon">Neon</option>
+            <option value="cyberpunk">Cyberpunk</option>
+            <option value="retro">Retro</option>
+            <option value="ocean">Ocean</option>
+            <option value="sunset">Sunset</option>
+          </select>
+        </label>
+        <p id="settings-theme-error" class="modal-error" hidden></p>
+        <button type="submit">Save theme</button>
+      </form>
+    </section>
+  </main>
+
+  <main id="view-admin" class="page" hidden>
+    <h1>Admin</h1>
+    <nav class="admin-nav section-nav" aria-label="Admin">
+      <button type="button" data-admin-tab="users">Users</button>
+      <button type="button" data-admin-tab="videos">Videos</button>
+      <button type="button" data-admin-tab="access">Access</button>
+      <button type="button" data-admin-tab="theme">Theme</button>
+    </nav>
+    <section id="admin-users" data-admin-panel="users">
+    <p class="modal-path">Add accounts, set passwords, and open a user to ban, delete, or see their videos.</p>
     <form id="user-add" class="auth-card stack">
       <h2>Add user</h2>
       <label>Username
@@ -186,6 +244,58 @@
       <p id="user-detail-error" class="modal-error" hidden></p>
       <h3>Videos</h3>
       <div id="user-videos"></div>
+    </section>
+    </section>
+    <section id="admin-videos" data-admin-panel="videos" hidden>
+      <p class="modal-path">Every video this server can see, including private uploads.</p>
+      <div id="admin-video-list"></div>
+    </section>
+    <section id="admin-access" data-admin-panel="access" hidden>
+      <form id="admin-access-form" class="auth-card stack">
+        <h2>Access</h2>
+        <label class="check"><input id="basic-on" type="checkbox"> Require HTTP basic auth</label>
+        <label>Basic auth username
+          <input id="basic-user" autocomplete="off">
+        </label>
+        <label>Basic auth password
+          <input id="basic-pass" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current password">
+        </label>
+        <label>IP rule
+          <select id="ip-mode">
+            <option value="off">Off</option>
+            <option value="allow">Allow only these</option>
+            <option value="deny">Exclude these</option>
+          </select>
+        </label>
+        <label>IP addresses or CIDR ranges
+          <textarea id="ip-list" rows="5" placeholder="192.168.1.10&#10;10.0.0.0/8"></textarea>
+        </label>
+        <p class="modal-path">127.0.0.1 is always allowed, so this machine can still open the player.</p>
+        <p id="access-error" class="modal-error" hidden></p>
+        <button type="submit">Save access</button>
+      </form>
+    </section>
+    <section id="admin-theme" data-admin-panel="theme" hidden>
+      <form id="admin-theme-form" class="auth-card stack">
+        <h2>Site theme</h2>
+        <p class="modal-path">This is the default for everyone. A visitor can still pick another theme for themselves.</p>
+        <label>Default theme
+          <select id="admin-theme">
+            <option value="dark">Dark</option>
+            <option value="white">White</option>
+            <option value="cyber-green">Cyber green</option>
+            <option value="fancy">Fancy</option>
+            <option value="neon">Neon</option>
+            <option value="cyberpunk">Cyberpunk</option>
+            <option value="retro">Retro</option>
+            <option value="ocean">Ocean</option>
+            <option value="sunset">Sunset</option>
+          </select>
+        </label>
+        <p id="theme-error" class="modal-error" hidden></p>
+        <p id="theme-saved" class="modal-path" hidden></p>
+        <button type="submit">Save theme</button>
+      </form>
     </section>
   </main>
 

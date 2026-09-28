@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.10"
+const version = "1.0.14"
 
 var (
 	root  string
@@ -238,6 +238,9 @@ func main() {
 		log.Fatal(err)
 	}
 	if err := initAuthPaths(); err != nil {
+		log.Fatal(err)
+	}
+	if err := loadSettings(); err != nil {
 		log.Fatal(err)
 	}
 	var movieRel string
@@ -559,6 +562,10 @@ func launchBrowser(rawURL string) {
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
+	if !gateRequest(w, r) {
+		log.Printf("%s - %s %s blocked", clientIP(r), r.Method, r.URL.RequestURI())
+		return
+	}
 	if u := currentUser(r); u != nil && u.MustChangePassword && !passwordChangeExempt(r) {
 		log.Printf("%s - %s %s blocked until password change", clientIP(r), r.Method, r.URL.RequestURI())
 		writeAPIError(w, http.StatusForbidden, "password_change_required")
@@ -596,6 +603,18 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
 		servePassword(w, r)
+		return
+	case "/api/settings":
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveSettings(w, r)
+		return
+	case "/api/theme":
+		if r.Method != http.MethodPut && r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveMyTheme(w, r)
 		return
 	case "/api/password-reset":
 		if r.Method != http.MethodPost {

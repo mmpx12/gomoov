@@ -52,6 +52,7 @@ type userRecord struct {
 	MustChangePassword bool   `json:"mustChangePassword"`
 	ResetRequested     bool   `json:"resetRequested"`
 	Banned             bool   `json:"banned"`
+	Theme              string `json:"theme,omitempty"`
 }
 
 type sessionRecord struct {
@@ -390,7 +391,7 @@ func publicUser(u userRecord, adminView bool) map[string]any {
 }
 
 func mePayload(u *userRecord) map[string]any {
-	out := map[string]any{"user": nil, "videoPlayer": videoPlayer}
+	out := map[string]any{"user": nil, "videoPlayer": videoPlayer, "theme": currentSettings().Theme}
 	if u == nil {
 		return out
 	}
@@ -398,7 +399,9 @@ func mePayload(u *userRecord) map[string]any {
 	if u.Admin {
 		pub["resetCount"] = resetCount()
 	}
+	pub["theme"] = u.Theme
 	out["user"] = pub
+	out["theme"] = currentSettings().Theme
 	return out
 }
 
@@ -420,7 +423,7 @@ func writeAPIError(w http.ResponseWriter, status int, msg string) {
 
 func passwordChangeExempt(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/api/login", "/api/logout", "/api/me", "/api/password", "/api/password-reset", "/", "/index.html", "/app.js", "/styles.css":
+	case "/api/login", "/api/logout", "/api/me", "/api/password", "/api/password-reset", "/api/settings", "/", "/index.html", "/app.js", "/styles.css":
 		return true
 	}
 	return false
@@ -500,7 +503,6 @@ func servePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authMu.Lock()
-	defer authMu.Unlock()
 	for i := range users {
 		if users[i].ID != u.ID {
 			continue
@@ -512,7 +514,9 @@ func servePassword(w http.ResponseWriter, r *http.Request) {
 		u.MustChangePassword = false
 		break
 	}
-	if err := saveUsersLocked(); err != nil {
+	err = saveUsersLocked()
+	authMu.Unlock()
+	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "could not save password")
 		return
 	}
