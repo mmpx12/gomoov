@@ -204,6 +204,8 @@ Stop a gomoov you started by hand before enabling either service. Both want port
 go test ./...
 ```
 
+A tag named `v1.*` builds the Linux binaries and attaches them to that GitHub release. `gomoov-linux-amd64` and `gomoov-linux-arm64` use `ffmpeg` and `ffprobe` on `PATH`. `gomoov-linux-amd64-ffmpeg` includes both.
+
 The version in `main.go` increases on each change. Movies, torrents, and the built `gomoov` binary are not part of the git history.
 
 ## Screenshots
