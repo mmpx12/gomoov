@@ -152,9 +152,13 @@ The line is on the terminal where you started gomoov. For the user service it is
 
 ## While you watch
 
-The home page opens sorted by latest. It can also sort by name, longest, size, or path, and can group a path sort into collapsible folders. Refresh checks the folder for new files and probes a file again only when its size or modification time changed. Continue watching is shared across every folder where gomoov is launched, and a movie is listed only when that file is in the current library. Resume is stored by absolute path in `~/.gomoov/progress.json`.
+The home page opens sorted by latest. It can also sort by name, longest, size, or path, and can group a path sort into collapsible folders. A series whose files are named like `S01E02` is one card. Open it for the season, or use Continue for the next episode that is not finished. When an episode ends, the next one starts after a short countdown. Show can be All, Unwatched, or Watched, and the card menu can mark a title watched or put it back. Refresh checks the folder for new files and probes a file again only when its size or modification time changed.
 
-**Watch later** is a separate list in this browser, under Settings → My videos. It does not start playback. **Recently added** shows files that arrived since the last visit.
+Continue watching, Watch later, and Recently added follow the signed-in account, including another browser. Without an account they stay on this browser, and resume is the shared `~/.gomoov/progress.json`. A signed-in resume is `~/.gomoov/users/<id>/progress.json`. A movie is listed only when that file is in the current library.
+
+**Watch later** is under Settings → My videos. It does not start playback. **Recently added** shows files that arrived since the last visit on that account.
+
+A `.srt` or `.vtt` file with the same name as the movie, or with a language suffix such as `.fr.srt`, appears in the subtitle menu. Dragging the timeline shows a small preview of that moment.
 
 A copied H.264 stream starts at the previous keyframe. The player says when that is earlier than the time you asked for. Changing quality keeps the current picture up until the new stream has a frame. If several videos need encoding at once, extra ones wait and the player says so. VAAPI or NVENC is used for that encode when the machine has it; burned-in subtitles and a smaller picture stay on libx264.
 
@@ -194,7 +198,8 @@ The site theme chosen here is the default for people who have not picked their o
 | `~/.gomoov/users.json` | Accounts and password hashes |
 | `~/.gomoov/sessions.json` | Sign-in sessions |
 | `~/.gomoov/visibility.json` | Which uploads are private |
-| `~/.gomoov/progress.json` | Continue watching |
+| `~/.gomoov/progress.json` | Continue watching when nobody is signed in |
+| `~/.gomoov/users/<id>/` | That account's resume, Watch later, and Recently added |
 | `~/.gomoov/settings.json` | Site theme, basic auth, and IP rules |
 | `~/.gomoov/audit.log` | Who deleted a video, and when |
 | `~/.gomoov/cache` | Probe, thumbnail, and subtitle cache. Override with `MOOVIES_CACHE` |

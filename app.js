@@ -10,6 +10,7 @@ const WATCH_LATER = "gomoov.watchlater";
 const LATER_COLLAPSE = "gomoov.watchlaterCollapsed";
 const RECENT_COLLAPSE = "gomoov.recentCollapsed";
 const SEEN_LIBRARY = "gomoov.seenLibrary";
+const WATCH_FILTER = "gomoov.watchFilter";
 const FOLDER_COLLAPSE = "moovies.folderCollapsed";
 const THEATER_KEY = "moovies.theater";
 const RATE_KEY = "moovies.rate";
@@ -78,8 +79,15 @@ let continueCollapsed = false;
 let laterCollapsed = false;
 let recentCollapsed = false;
 let qualityGhost = null;
-const seenLibrary = Number(localStorage.getItem(SEEN_LIBRARY)) || 0;
-let visitNoted = false;
+let seenLibrary = Number(localStorage.getItem(SEEN_LIBRARY)) || 0;
+let seenNotedFor = "";
+let watchLater = [];
+let watchFilter = "all";
+let infoSeries = "";
+let upNextTimer = 0;
+let upNextToken = 0;
+let previewTimer = 0;
+let previewToken = 0;
 let current = null;
 let streamStart = 0;
 let playToken = 0;
@@ -253,6 +261,64 @@ async function loadServerProgress() {
   await Promise.all(jobs);
 }
 
+function localWatchLater() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WATCH_LATER));
+    return Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadWatchLater() {
+  if (!(me && me.id)) {
+    watchLater = localWatchLater();
+    return;
+  }
+  const response = await fetch("/api/watchlater");
+  if (!response.ok) {
+    watchLater = [];
+    return;
+  }
+  const data = await response.json();
+  let paths = Array.isArray(data.paths) ? data.paths : [];
+  if (!paths.length) {
+    const local = localWatchLater();
+    if (local.length) {
+      const saved = await fetch("/api/watchlater", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: local })
+      });
+      if (saved.ok) {
+        const body = await saved.json();
+        paths = Array.isArray(body.paths) ? body.paths : local;
+      }
+    }
+  }
+  watchLater = paths;
+}
+
+async function loadSeen() {
+  if (!(me && me.id)) {
+    seenLibrary = Number(localStorage.getItem(SEEN_LIBRARY)) || 0;
+    return;
+  }
+  const response = await fetch("/api/seen");
+  if (!response.ok) return;
+  const data = await response.json();
+  let at = Number(data.at) || 0;
+  if (!at) at = Number(localStorage.getItem(SEEN_LIBRARY)) || 0;
+  seenLibrary = at;
+}
+
+async function loadAccountState() {
+  await loadServerProgress();
+  await loadWatchLater();
+  await loadSeen();
+  noteLibraryVisit();
+}
+
 function totalDuration() {
   if (current && current.duration > 0) return current.duration;
   if (Number.isFinite(video.duration)) return streamStart + video.duration;
@@ -405,12 +471,8 @@ function renderWatchLater() {
 }
 
 function watchLaterIDs() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(WATCH_LATER));
-    return Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
+  if (me && me.id) return watchLater.slice();
+  return localWatchLater();
 }
 
 function watchKey(item) {
@@ -418,21 +480,172 @@ function watchKey(item) {
 }
 
 function inWatchLater(item) {
-  return watchLaterIDs().includes(watchKey(item));
+  const key = watchKey(item);
+  return watchLaterIDs().some((saved) => saved === key || saved === item.path);
+}
+
+function saveWatchLater(list) {
+  watchLater = list;
+  if (me && me.id) {
+    fetch("/api/watchlater", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: list })
+    }).catch(() => {});
+    return;
+  }
+  localStorage.setItem(WATCH_LATER, JSON.stringify(list));
 }
 
 function toggleWatchLater(key) {
   const had = watchLaterIDs().includes(key);
   const list = watchLaterIDs().filter((item) => item !== key);
   if (!had) list.push(key);
-  localStorage.setItem(WATCH_LATER, JSON.stringify(list));
+  saveWatchLater(list);
+  const seriesView = document.getElementById("series-view");
+  if (seriesView && !seriesView.hidden && seriesView.dataset.name) {
+    showSeries(seriesView.dataset.name);
+    return;
+  }
   renderHome();
 }
 
 function noteLibraryVisit() {
-  if (visitNoted) return;
-  visitNoted = true;
-  localStorage.setItem(SEEN_LIBRARY, String(Date.now() / 1000));
+  const who = me && me.id ? me.id : "anon";
+  if (seenNotedFor === who) return;
+  seenNotedFor = who;
+  const now = Date.now() / 1000;
+  if (me && me.id) {
+    fetch("/api/seen", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ at: now })
+    }).catch(() => {});
+    return;
+  }
+  localStorage.setItem(SEEN_LIBRARY, String(now));
+}
+
+function isWatched(item) {
+  const saved = entryFor(item);
+  return !!(saved && saved.done);
+}
+
+function passesWatchFilter(item) {
+  if (watchFilter === "watched") return isWatched(item);
+  if (watchFilter === "unwatched") return !isWatched(item);
+  return true;
+}
+
+function seriesEpisodes(name) {
+  return catalog.filter((item) => item.series === name)
+    .sort((a, b) => a.season - b.season || a.episode - b.episode || a.fullTitle.localeCompare(b.fullTitle));
+}
+
+function nextToPlay(episodes) {
+  const resume = episodes.find((item) => {
+    const saved = entryFor(item);
+    return saved && !saved.done && saved.t >= RESUME_AT;
+  });
+  if (resume) return resume;
+  return episodes.find((item) => !isWatched(item)) || episodes[0] || null;
+}
+
+function nextEpisode(item) {
+  if (!item || !item.series) return null;
+  const episodes = seriesEpisodes(item.series);
+  const index = episodes.findIndex((other) => other.path === item.path);
+  if (index < 0 || index + 1 >= episodes.length) return null;
+  return episodes[index + 1];
+}
+
+function seriesUnit(name) {
+  const episodes = seriesEpisodes(name);
+  const latest = episodes.reduce((best, item) => ((item.mtime || 0) > (best || 0) ? item.mtime : best), 0);
+  const play = nextToPlay(episodes);
+  return {
+    kind: "series",
+    name,
+    episodes,
+    play,
+    mtime: latest,
+    duration: episodes.reduce((sum, item) => sum + (item.duration || 0), 0),
+    size: episodes.reduce((sum, item) => sum + (item.size || 0), 0),
+    path: (play && play.path) || (episodes[0] && episodes[0].path) || name
+  };
+}
+
+function groupLibrary(items) {
+  const units = [];
+  const seen = new Set();
+  for (const item of items) {
+    if (!item.series) {
+      units.push({
+        kind: "movie",
+        name: item.fullTitle,
+        item,
+        mtime: item.mtime || 0,
+        duration: item.duration || 0,
+        size: item.size || 0,
+        path: item.displayPath || item.path
+      });
+      continue;
+    }
+    if (seen.has(item.series)) continue;
+    seen.add(item.series);
+    units.push(seriesUnit(item.series));
+  }
+  return units;
+}
+
+function compareUnits(a, b) {
+  let diff = 0;
+  if (sortKey === "newest") diff = (a.mtime || 0) - (b.mtime || 0);
+  else if (sortKey === "longest") diff = (a.duration || 0) - (b.duration || 0);
+  else if (sortKey === "size") diff = (a.size || 0) - (b.size || 0);
+  else if (sortKey === "path") diff = String(a.path).localeCompare(String(b.path), undefined, { numeric: true });
+  else diff = String(a.name).localeCompare(String(b.name), undefined, { numeric: true });
+  if (diff === 0) diff = String(a.name).localeCompare(String(b.name), undefined, { numeric: true });
+  return sortDesc ? -diff : diff;
+}
+
+function seriesCardHTML(unit) {
+  const play = unit.play || unit.episodes[0];
+  const left = unit.episodes.filter((item) => !isWatched(item)).length;
+  const hue = hueOf(unit.name);
+  const href = "#/series?s=" + encodeURIComponent(unit.name);
+  let sub = unit.episodes.length === 1 ? "1 episode" : unit.episodes.length + " episodes";
+  if (left && left < unit.episodes.length) sub += " · " + left + " left";
+  const ratio = play ? progressRatio(play) : 0;
+  const continueLabel = play && entryFor(play) && !isWatched(play) && entryFor(play).t >= RESUME_AT
+    ? "Continue · Episode " + play.episode
+    : (left ? "Play · Episode " + (play ? play.episode : 1) : "Play again");
+  return (
+    '<article class="card">' +
+      '<div class="card-media">' +
+        '<a class="card-open" href="' + href + '" data-series="' + esc(unit.name) + '">' +
+          '<div class="thumb" style="--h:' + hue + ';background:linear-gradient(145deg,hsl(' + hue + ',55%,32%),hsl(' + ((hue + 36) % 360) + ',45%,14%))">' +
+            '<div class="thumb-fallback">' + esc(initials(unit.name).toUpperCase()) + "</div>" +
+            (play ? '<img class="thumb-img" alt="" loading="lazy" draggable="false" src="' + esc(thumbURL(play)) + '">' : "") +
+            '<span class="badge">' + esc(String(unit.episodes.length)) + "</span>" +
+            (ratio ? '<div class="thumb-progress"><span style="width:' + (ratio * 100).toFixed(1) + '%"></span></div>' : "") +
+          "</div>" +
+        "</a>" +
+      "</div>" +
+      '<div class="card-head">' +
+        '<a class="card-title" href="' + href + '" data-series="' + esc(unit.name) + '">' + esc(unit.name) + "</a>" +
+        '<div class="card-action card-menu">' +
+          '<button type="button" class="info-btn" data-info data-series="' + esc(unit.name) + '" data-path="' + esc(play ? play.path : "") + '" aria-label="Menu for ' + esc(unit.name) + '">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
+          "</button>" +
+        "</div>" +
+      "</div>" +
+      '<div class="card-meta">' + esc(sub) + "</div>" +
+      (play
+        ? '<div class="card-actions"><div class="card-action"><a class="continue-remove" href="#/watch?v=' + encodeURIComponent(play.path) + '" data-video="' + esc(play.path) + '">' + esc(continueLabel) + "</a></div></div>"
+        : "") +
+    "</article>"
+  );
 }
 
 function nextHTML(item) {
@@ -589,9 +802,23 @@ function compareItems(a, b) {
   return sortDesc ? -diff : diff;
 }
 
+function showLibraryBrowser() {
+  const browser = document.getElementById("library-browser");
+  const series = document.getElementById("series-view");
+  if (browser) browser.hidden = false;
+  if (series) series.hidden = true;
+}
+
 function renderHome() {
+  showLibraryBrowser();
   const q = searchInput.value.trim();
-  const items = filtered().slice().sort(compareItems);
+  const items = filtered().filter((item) => {
+    if (watchFilter === "all") return true;
+    if (!item.series) return passesWatchFilter(item);
+    const episodes = seriesEpisodes(item.series);
+    const allDone = episodes.length > 0 && episodes.every(isWatched);
+    return watchFilter === "watched" ? allDone : !allDone;
+  }).slice().sort(compareItems);
   const continuing = !q
     ? catalog
       .filter((item) => {
@@ -618,7 +845,7 @@ function renderHome() {
   recentRow.innerHTML = recent.map((item) => cardHTML(item, "plain")).join("");
 
   if (!items.length) {
-    const empty = q ? "No videos match “" + esc(q) + "”." : (mineOnly && me ? "No videos of yours yet." : "No videos in this folder.");
+    const empty = q ? "No videos match “" + esc(q) + "”." : (watchFilter !== "all" ? "Nothing matches this filter." : (mineOnly && me ? "No videos of yours yet." : "No videos in this folder."));
     libraryEl.innerHTML = '<p class="empty">' + empty + "</p>";
     return;
   }
@@ -631,35 +858,60 @@ function renderHome() {
     return;
   }
 
-  if (q || sortKey !== "name" || sortDesc) {
-    const heading = q ? "Results" : "Library";
-    libraryEl.innerHTML = '<section class="shelf"><h2>' + heading + '</h2><div class="grid">' +
-      items.map((item) => cardHTML(item, "plain")).join("") + "</div></section>";
+  const units = groupLibrary(items).sort(compareUnits);
+  const heading = q ? "Results" : "Library";
+  libraryEl.innerHTML = '<section class="shelf"><h2>' + heading + '</h2><div class="grid">' +
+    units.map((unit) => unit.kind === "series" ? seriesCardHTML(unit) : cardHTML(unit.item, "plain")).join("") +
+    "</div></section>";
+}
+
+function showSeries(name) {
+  const episodes = seriesEpisodes(name);
+  if (!episodes.length) {
+    showHome();
+    setStatus("That series is not in the library.");
     return;
   }
-
-  const series = new Map();
-  const movies = [];
-  for (const item of items) {
-    if (item.series) {
-      if (!series.has(item.series)) series.set(item.series, []);
-      series.get(item.series).push(item);
-    } else {
-      movies.push(item);
-    }
+  flushProgress();
+  closeMenu();
+  closeAccountMenu();
+  closeInfoMenu();
+  stopVideo();
+  current = null;
+  viewWatch.hidden = true;
+  viewLogin.hidden = true;
+  viewAdmin.hidden = true;
+  viewSettings.hidden = true;
+  viewHome.hidden = false;
+  document.getElementById("library-browser").hidden = true;
+  const view = document.getElementById("series-view");
+  view.hidden = false;
+  view.dataset.name = name;
+  document.title = name + " · gomoov";
+  document.getElementById("series-title").textContent = name;
+  const left = episodes.filter((item) => !isWatched(item)).length;
+  document.getElementById("series-meta").textContent = episodes.length + (episodes.length === 1 ? " episode" : " episodes") + (left ? " · " + left + " left" : " · finished");
+  const play = nextToPlay(episodes);
+  const button = document.getElementById("series-continue");
+  button.hidden = !play;
+  if (play) {
+    const resumed = entryFor(play) && !isWatched(play) && entryFor(play).t >= RESUME_AT;
+    button.textContent = (resumed ? "Continue" : (left ? "Play" : "Play again")) + " · Episode " + play.episode;
+    button.dataset.path = play.path;
   }
-  const html = [];
-  for (const [name, eps] of [...series.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    eps.sort((a, b) => a.season - b.season || a.episode - b.episode);
-    html.push('<section class="shelf"><h2>' + esc(name) + '</h2><div class="grid">' +
-      eps.map((item) => cardHTML(item, "episode")).join("") + "</div></section>");
+  const seasons = new Map();
+  for (const item of episodes) {
+    const key = item.season || 1;
+    if (!seasons.has(key)) seasons.set(key, []);
+    seasons.get(key).push(item);
   }
-  if (movies.length) {
-    movies.sort((a, b) => a.fullTitle.localeCompare(b.fullTitle));
-    html.push('<section class="shelf"><h2>Movies</h2><div class="grid">' +
-      movies.map((item) => cardHTML(item, "plain")).join("") + "</div></section>");
+  let html = "";
+  for (const [season, eps] of seasons) {
+    html += '<section class="shelf"><h2>Season ' + esc(String(season)) + '</h2><div class="grid">' +
+      eps.map((item) => cardHTML(item, "episode")).join("") + "</div></section>";
   }
-  libraryEl.innerHTML = html.join("");
+  document.getElementById("series-episodes").innerHTML = html;
+  window.scrollTo(0, 0);
 }
 
 function upNextList(item) {
@@ -694,8 +946,84 @@ function showHome() {
   renderHome();
 }
 
+function cancelUpNext() {
+  upNextToken += 1;
+  window.clearInterval(upNextTimer);
+  upNextTimer = 0;
+  const gate = document.getElementById("up-next-gate");
+  if (gate) gate.hidden = true;
+}
+
+function armUpNext(item) {
+  cancelUpNext();
+  const next = nextEpisode(item);
+  if (!next) return;
+  const gate = document.getElementById("up-next-gate");
+  document.getElementById("up-next-title").textContent = next.fullTitle;
+  const count = document.getElementById("up-next-count");
+  let left = 8;
+  count.textContent = "Playing in " + left + "s";
+  gate.hidden = false;
+  gate.dataset.path = next.path;
+  const token = ++upNextToken;
+  upNextTimer = window.setInterval(() => {
+    if (token !== upNextToken) return;
+    left -= 1;
+    if (left <= 0) {
+      const path = gate.dataset.path;
+      cancelUpNext();
+      if (!path) return;
+      location.hash = "/watch?v=" + encodeURIComponent(path);
+      route();
+      return;
+    }
+    count.textContent = "Playing in " + left + "s";
+  }, 1000);
+}
+
+function hidePreview() {
+  previewToken += 1;
+  window.clearTimeout(previewTimer);
+  const preview = document.getElementById("timeline-preview");
+  if (preview) preview.hidden = true;
+}
+
+function schedulePreview(ratio) {
+  if (!current) return;
+  if (isMobile() && !scrubbing) return;
+  const dur = totalDuration();
+  if (!dur) return;
+  const preview = document.getElementById("timeline-preview");
+  const left = Math.min(92, Math.max(8, ratio * 100));
+  preview.style.left = left + "%";
+  timelineTip.style.left = left + "%";
+  timelineTip.hidden = false;
+  timelineTip.textContent = formatTime(ratio * dur);
+  window.clearTimeout(previewTimer);
+  const at = ratio * dur;
+  previewTimer = window.setTimeout(() => {
+    const token = ++previewToken;
+    const img = document.getElementById("timeline-preview-img");
+    const url = "/frame?path=" + encodeURIComponent(current.path) + "&t=" + at.toFixed(2);
+    const show = () => {
+      if (token === previewToken) preview.hidden = false;
+    };
+    img.onload = show;
+    img.onerror = () => {
+      if (token === previewToken) preview.hidden = true;
+    };
+    if (img.getAttribute("src") === url && img.complete && img.naturalWidth) {
+      show();
+      return;
+    }
+    img.src = url;
+  }, 140);
+}
+
 function stopVideo() {
   playToken += 1;
+  cancelUpNext();
+  hidePreview();
   ignoreMedia = true;
   video.pause();
   video.removeAttribute("src");
@@ -856,6 +1184,8 @@ function seekTo(seconds, resume) {
 }
 
 function openVideo(item, startAt) {
+  cancelUpNext();
+  hidePreview();
   flushProgress();
   current = item;
   viewHome.hidden = true;
@@ -893,7 +1223,7 @@ function parseRoute() {
   const q = hash.indexOf("?");
   const pathname = q === -1 ? hash : hash.slice(0, q);
   const params = new URLSearchParams(q === -1 ? "" : hash.slice(q + 1));
-  return { pathname, video: params.get("v"), user: params.get("u"), t: params.get("t") };
+  return { pathname, video: params.get("v"), user: params.get("u"), t: params.get("t"), series: params.get("s") };
 }
 
 function routeTime(raw) {
@@ -908,7 +1238,7 @@ function route() {
     showPasswordGate(true);
     return;
   }
-  const { pathname, video: path, user: userID, t } = parseRoute();
+  const { pathname, video: path, user: userID, t, series } = parseRoute();
   if (videoPlayer && (pathname === "/login" || pathname === "/users" || pathname === "/admin" || pathname === "/settings")) {
     location.hash = "/";
     return;
@@ -938,6 +1268,10 @@ function route() {
     }
     const tab = new URLSearchParams((location.hash.split("?")[1] || "")).get("tab") || "password";
     showSettings(tab);
+    return;
+  }
+  if (pathname === "/series" && series) {
+    showSeries(series);
     return;
   }
   if (pathname === "/watch" && path) {
@@ -977,6 +1311,7 @@ function ratioFromEvent(event) {
 
 function togglePlay() {
   if (!current) return;
+  cancelUpNext();
   if (video.paused) video.play().catch(() => {});
   else video.pause();
 }
@@ -1417,6 +1752,12 @@ searchInput.addEventListener("blur", () => {
 });
 
 searchInput.addEventListener("input", () => {
+  const seriesView = document.getElementById("series-view");
+  if (seriesView && !seriesView.hidden) {
+    location.hash = "/";
+    showHome();
+    return;
+  }
   if (!viewHome.hidden) renderHome();
 });
 
@@ -1438,6 +1779,14 @@ document.getElementById("sort-dir").addEventListener("click", () => {
 document.getElementById("group-folders").addEventListener("change", (event) => {
   groupByFolder = event.target.checked;
   saveSort();
+  renderHome();
+});
+watchFilter = localStorage.getItem(WATCH_FILTER) || "all";
+if (!["all", "unwatched", "watched"].includes(watchFilter)) watchFilter = "all";
+document.getElementById("watch-filter").value = watchFilter;
+document.getElementById("watch-filter").addEventListener("change", (event) => {
+  watchFilter = event.target.value;
+  localStorage.setItem(WATCH_FILTER, watchFilter);
   renderHome();
 });
 mineOnly = localStorage.getItem(MINE_ONLY) === "1";
@@ -1481,8 +1830,28 @@ function filePathLabel(item) {
   return item.displayPath || item.path;
 }
 
+function setWatched(item, done) {
+  if (!item) return;
+  if (done) sendProgress(item.path, { t: 0, dur: item.duration || 0, at: Date.now(), done: true });
+  else sendProgress(item.path, null);
+}
+
+function markInfoWatched() {
+  const done = document.getElementById("info-watched").textContent.indexOf("unwatched") === -1;
+  if (infoSeries) {
+    seriesEpisodes(infoSeries).forEach((item) => setWatched(item, done));
+  } else {
+    setWatched(catalog.find((entry) => entry.path === infoTarget) || current, done);
+  }
+  closeInfoMenu();
+  const seriesView = document.getElementById("series-view");
+  if (seriesView && !seriesView.hidden && seriesView.dataset.name) showSeries(seriesView.dataset.name);
+  else if (!viewHome.hidden) renderHome();
+}
+
 function openInfoFor(item, anchor) {
   if (!item) return;
+  infoSeries = anchor && anchor.dataset.series || "";
   infoTarget = item.path;
   document.getElementById("info-quality").textContent = [item.quality, item.edition, item.sizeLabel].filter(Boolean).join(" · ") || "Unknown";
   const languages = (item.audioTracks || []).map((track) => track.label);
@@ -1497,7 +1866,20 @@ function openInfoFor(item, anchor) {
   const canPrivacy = !!(item.ownerId && me && (item.mine || me.admin));
   privacyBtn.hidden = !canPrivacy;
   privacyBtn.textContent = item.private ? "Make public" : "Make private";
-  document.getElementById("info-remove").hidden = !item.canRemove;
+  document.getElementById("info-remove").hidden = infoSeries || !item.canRemove;
+  const watchedBtn = document.getElementById("info-watched");
+  if (infoSeries) {
+    const episodes = seriesEpisodes(infoSeries);
+    const allDone = episodes.length > 0 && episodes.every(isWatched);
+    watchedBtn.hidden = false;
+    watchedBtn.textContent = allDone ? "Mark unwatched" : "Mark watched";
+    document.getElementById("info-duration").textContent = episodes.length + (episodes.length === 1 ? " episode" : " episodes");
+    document.getElementById("info-path").textContent = infoSeries;
+    document.getElementById("info-privacy").hidden = true;
+  } else {
+    watchedBtn.hidden = false;
+    watchedBtn.textContent = isWatched(item) ? "Mark unwatched" : "Mark watched";
+  }
   document.querySelectorAll(".info-btn[aria-expanded='true']").forEach((btn) => btn.setAttribute("aria-expanded", "false"));
   if (anchor && anchor.classList && anchor.classList.contains("info-btn")) anchor.setAttribute("aria-expanded", "true");
   const menu = document.getElementById("info-menu");
@@ -1570,6 +1952,17 @@ function applyCatalog(videos) {
 }
 
 document.getElementById("info-remove").addEventListener("click", openRemoveConfirm);
+document.getElementById("info-watched").addEventListener("click", markInfoWatched);
+document.getElementById("series-back").addEventListener("click", () => {
+  location.hash = "/";
+  showHome();
+});
+document.getElementById("series-continue").addEventListener("click", () => {
+  const path = document.getElementById("series-continue").dataset.path;
+  if (!path) return;
+  location.hash = "/watch?v=" + encodeURIComponent(path);
+  route();
+});
 document.getElementById("confirm-no").addEventListener("click", closeRemoveConfirm);
 document.getElementById("confirm-yes").addEventListener("click", removeCurrentFile);
 document.getElementById("confirm").addEventListener("click", (event) => {
@@ -1620,6 +2013,14 @@ document.body.addEventListener("click", (event) => {
     return;
   }
   if (!event.target.closest("#info-menu")) closeInfoMenu();
+  const seriesLink = event.target.closest("a[data-series]");
+  if (seriesLink) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    location.hash = "/series?s=" + encodeURIComponent(seriesLink.dataset.series);
+    route();
+    return;
+  }
   const link = event.target.closest("a[data-video]");
   if (!link) return;
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -1716,21 +2117,18 @@ function bindSeekBar(el) {
     }
     scrubRatio = ratioOn(el, event);
     paintTimeline();
+    if (el === timeline) schedulePreview(scrubRatio);
     showChrome();
   };
   const move = (event) => {
     if (!scrubbing) {
-      if (!isMobile()) {
-        const ratio = ratioOn(el, event);
-        timelineTip.hidden = false;
-        timelineTip.style.left = (ratio * 100) + "%";
-        timelineTip.textContent = formatTime(ratio * totalDuration());
-      }
+      if (!isMobile() && el === timeline) schedulePreview(ratioOn(el, event));
       return;
     }
     if (event.cancelable) event.preventDefault();
     scrubRatio = ratioOn(el, event);
     paintTimeline();
+    if (el === timeline) schedulePreview(scrubRatio);
   };
   const end = (event) => {
     if (!scrubbing) return;
@@ -1740,6 +2138,7 @@ function bindSeekBar(el) {
     el.classList.remove("scrubbing");
     stage.classList.remove("scrubbing");
     timelineTip.hidden = true;
+    hidePreview();
     commitSeek(ratio, wasPlaying);
     showChrome();
   };
@@ -1760,6 +2159,24 @@ function bindSeekBar(el) {
 
 bindSeekBar(timeline);
 bindSeekBar(document.getElementById("mini-progress"));
+timeline.addEventListener("pointerleave", () => {
+  if (!scrubbing) {
+    timelineTip.hidden = true;
+    hidePreview();
+  }
+});
+document.getElementById("up-next-cancel").addEventListener("click", (event) => {
+  event.stopPropagation();
+  cancelUpNext();
+});
+document.getElementById("up-next-now").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const path = document.getElementById("up-next-gate").dataset.path;
+  cancelUpNext();
+  if (!path) return;
+  location.hash = "/watch?v=" + encodeURIComponent(path);
+  route();
+});
 
 stage.addEventListener("mousemove", () => {
   if (!isMobile()) showChrome();
@@ -1806,6 +2223,7 @@ function attachVideo(el) {
     sendProgress(current.path, { t: 0, dur: totalDuration(), at: Date.now(), done: true });
     syncTransport();
     setBuffering(false);
+    armUpNext(current);
   });
   el.addEventListener("click", () => {
     if (isMobile() || el !== video) return;
@@ -1884,6 +2302,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (typing || viewWatch.hidden || !current) return;
+  if (event.key === "Escape" && upNextTimer) {
+    event.preventDefault();
+    cancelUpNext();
+    return;
+  }
   if (event.key === "?") {
     event.preventDefault();
     toggleKeys();
@@ -2070,8 +2493,7 @@ async function loadCatalog() {
   if (!response.ok) throw new Error("bad status");
   const data = await response.json();
   catalog = applyCatalog(data.videos || []);
-  await loadServerProgress();
-  noteLibraryVisit();
+  await loadAccountState();
   setStatus("");
 }
 

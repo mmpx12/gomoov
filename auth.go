@@ -888,6 +888,7 @@ func serveUserDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	removeUserFiles(u.ID)
+	removeUserState(u.ID)
 	invalidateLibrary()
 	log.Printf("%s deleted user %s", clientIP(r), u.Username)
 	writeJSON(w, map[string]bool{"ok": true})
@@ -1186,11 +1187,7 @@ func serveTransfer(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "could not hand over the video")
 		return
 	}
-	if prog, ok := readProgress()[abs]; ok {
-		saved := prog
-		_ = writeProgressEntry(newAbs, &saved)
-		_ = writeProgressEntry(abs, nil)
-	}
+	moveStoredPath(abs, newAbs)
 	invalidateLibrary()
 	log.Printf("%s handed %s to %s", clientIP(r), relOf(newAbs), target.Username)
 	writeJSON(w, map[string]any{"ok": true, "path": relOf(newAbs), "private": private})

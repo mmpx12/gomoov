@@ -51,6 +51,7 @@
       <dd id="info-visibility">Public</dd>
     </dl>
     <button type="button" id="info-privacy" class="info-action" hidden>Make private</button>
+    <button type="button" id="info-watched" class="info-action">Mark watched</button>
     <button type="button" id="info-remove" class="info-remove">Remove</button>
   </div>
 
@@ -309,6 +310,7 @@
   </main>
 
   <main id="view-home" class="page">
+    <div id="library-browser">
     <div class="sortbar">
       <label class="sort-key">
         <span>Sort</span>
@@ -318,6 +320,14 @@
           <option value="longest">Longest</option>
           <option value="size">Size</option>
           <option value="path">Path</option>
+        </select>
+      </label>
+      <label class="sort-key">
+        <span>Show</span>
+        <select id="watch-filter" aria-label="Watched">
+          <option value="all">All</option>
+          <option value="unwatched">Unwatched</option>
+          <option value="watched">Watched</option>
         </select>
       </label>
       <button type="button" id="sort-dir" class="sort-dir" aria-label="Sort direction">Latest first</button>
@@ -346,6 +356,14 @@
       <div id="recent-row" class="row"></div>
     </section>
     <div id="library"></div>
+    </div>
+    <section id="series-view" hidden>
+      <button type="button" id="series-back" class="text-btn">Library</button>
+      <h1 id="series-title"></h1>
+      <p id="series-meta" class="modal-path"></p>
+      <button type="button" id="series-continue" class="sort-dir">Continue</button>
+      <div id="series-episodes"></div>
+    </section>
   </main>
 
   <main id="view-watch" class="page watch-layout" hidden>
@@ -361,6 +379,15 @@
           <p id="player-message-text"></p>
           <button type="button" id="player-retry">Try again</button>
         </div>
+        <div id="up-next-gate" class="player-message" hidden>
+          <p id="up-next-kicker">Next episode</p>
+          <p id="up-next-title"></p>
+          <p id="up-next-count"></p>
+          <div class="up-next-actions">
+            <button type="button" id="up-next-now">Play now</button>
+            <button type="button" id="up-next-cancel" class="text-btn">Cancel</button>
+          </div>
+        </div>
         <div id="subs" class="subs" aria-live="polite"></div>
         <div id="seek-hint" class="seek-hint" hidden></div>
         <div id="mini-progress" class="mini-progress" aria-hidden="true"><span id="mini-play"></span></div>
@@ -369,6 +396,9 @@
             <div class="timeline-track">
               <div id="timeline-buf" class="timeline-buf"></div>
               <div id="timeline-play" class="timeline-play"></div>
+            </div>
+            <div id="timeline-preview" class="timeline-preview" hidden>
+              <img id="timeline-preview-img" alt="">
             </div>
             <div id="timeline-tip" class="timeline-tip" hidden>0:00</div>
           </div>

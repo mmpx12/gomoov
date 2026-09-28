@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.29"
+const version = "1.0.30"
 
 // probeVer invalidates cached probes when the stored shape changes.
 const probeVer = 2
@@ -82,6 +82,7 @@ var (
 	probeCache map[string]probeEntry
 
 	thumbSlots = make(chan struct{}, 2)
+	frameSlots = make(chan struct{}, 1)
 	thumbMu    sync.Mutex
 	thumbLocks = map[string]*sync.Mutex{}
 
@@ -728,6 +729,16 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		serveProgress(w, r)
 		return
 	}
+	if r.URL.Path == "/api/watchlater" && (r.Method == http.MethodGet || r.Method == http.MethodPut || r.Method == http.MethodPost) {
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveWatchLater(w, r)
+		return
+	}
+	if r.URL.Path == "/api/seen" && (r.Method == http.MethodGet || r.Method == http.MethodPut || r.Method == http.MethodPost) {
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveSeen(w, r)
+		return
+	}
 	if r.URL.Path == "/api/video" && r.Method == http.MethodDelete {
 		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
 		deleteVideo(w, r)
@@ -758,6 +769,11 @@ func handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		serveSubs(w, q.Get("path"), q.Get("id"))
+	case "/frame":
+		if _, ok := visiblePath(w, r, q.Get("path")); !ok {
+			return
+		}
+		serveFrame(w, q.Get("path"), q.Get("t"))
 	case "/start":
 		if _, ok := visiblePath(w, r, q.Get("path")); !ok {
 			return
@@ -799,7 +815,7 @@ func deleteVideo(w http.ResponseWriter, r *http.Request) {
 	invalidateLibrary()
 	abs, _ := filepath.Abs(path)
 	forgetVideo(abs)
-	_ = writeProgressEntry(abs, nil)
+	forgetProgressPath(abs)
 	who := "anonymous"
 	if u := currentUser(r); u != nil && u.Username != "" {
 		who = u.Username
@@ -867,6 +883,62 @@ func serveThumb(w http.ResponseWriter, raw string) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(img)
+}
+
+func serveFrame(w http.ResponseWriter, raw, tRaw string) {
+	path, err := safeVideo(raw)
+	t, ferr := strconv.ParseFloat(tRaw, 64)
+	if err != nil || ferr != nil || math.IsNaN(t) || math.IsInf(t, 0) || t < 0 {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if t > 24*60*60 {
+		t = 24 * 60 * 60
+	}
+	img := frameFile(path, t)
+	if img == nil {
+		http.Error(w, "no frame", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(img)
+}
+
+func frameFile(path string, t float64) []byte {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	bucket := math.Floor(t/5) * 5
+	if bucket < 0 {
+		bucket = 0
+	}
+	key := fmt.Sprintf("%s:%d:%d:frame:%.0f", relOf(path), st.Size(), st.ModTime().UnixNano(), bucket)
+	sum := sha1.Sum([]byte(key))
+	dest := filepath.Join(cache, "frames", fmt.Sprintf("%x.jpg", sum))
+	if b, err := os.ReadFile(dest); err == nil && len(b) > 200 {
+		return b
+	}
+	select {
+	case frameSlots <- struct{}{}:
+		defer func() { <-frameSlots }()
+	default:
+		return nil
+	}
+	lock := thumbLock(dest)
+	lock.Lock()
+	defer lock.Unlock()
+	if b, err := os.ReadFile(dest); err == nil && len(b) > 200 {
+		return b
+	}
+	_ = os.MkdirAll(filepath.Dir(dest), 0o755)
+	data := ffmpegStill([]string{"-ss", fmt.Sprintf("%.3f", bucket), "-i", path}, 320, 200, 8*time.Second)
+	if data == nil {
+		return nil
+	}
+	_ = os.WriteFile(dest, data, 0o644)
+	return data
 }
 
 func serveSubs(w http.ResponseWriter, raw, idRaw string) {
@@ -1007,7 +1079,7 @@ func burnSubIndex(path, raw string) *int {
 		return nil
 	}
 	id, err := strconv.Atoi(raw)
-	if err != nil {
+	if err != nil || id >= sidecarIDBase {
 		return nil
 	}
 	info := libraryByPath()[relOf(path)]
@@ -1198,13 +1270,15 @@ func safeExternalPath(rest string) (string, error) {
 
 func getLibrary() []videoInfo {
 	files := listVideos()
+	dirCache := map[string][]os.DirEntry{}
 	parts := make([]string, 0, len(files))
 	for _, p := range files {
 		st, err := os.Stat(p)
 		if err != nil {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s:%d:%d", relOf(p), st.Size(), st.ModTime().UnixNano()))
+		entries := dirEntries(dirCache, filepath.Dir(p))
+		parts = append(parts, fmt.Sprintf("%s:%d:%d%s", relOf(p), st.Size(), st.ModTime().UnixNano(), sidecarStamp(p, entries)))
 	}
 	stamp := strings.Join(parts, "|")
 	libraryMu.Lock()
@@ -1218,20 +1292,21 @@ func getLibrary() []videoInfo {
 		if err != nil {
 			continue
 		}
-		stamp := fmt.Sprintf("%d:%d", st.Size(), st.ModTime().UnixNano())
+		entries := dirEntries(dirCache, filepath.Dir(p))
+		fileStamp := fmt.Sprintf("%d:%d", st.Size(), st.ModTime().UnixNano())
 		memProbeMu.Lock()
 		hit, ok := memProbe[p]
 		memProbeMu.Unlock()
-		if ok && hit.stamp == stamp && hit.info.Duration > 0 {
-			videos = append(videos, hit.info)
+		if ok && hit.stamp == fileStamp && hit.info.Duration > 0 {
+			videos = append(videos, withSidecars(p, hit.info, entries))
 			continue
 		}
 		info := probe(p)
 		if info != nil && info.Duration > 0 {
-			videos = append(videos, *info)
 			memProbeMu.Lock()
-			memProbe[p] = memHit{stamp: stamp, info: *info}
+			memProbe[p] = memHit{stamp: fileStamp, info: *info}
 			memProbeMu.Unlock()
+			videos = append(videos, withSidecars(p, *info, entries))
 		}
 	}
 	if videos == nil {
@@ -1457,13 +1532,17 @@ func thumbLock(key string) *sync.Mutex {
 }
 
 func ffmpegJPEG(input []string) []byte {
+	return ffmpegStill(input, 640, 800, 30*time.Second)
+}
+
+func ffmpegStill(input []string, width, minSize int, timeout time.Duration) []byte {
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
 	args = append(args, input...)
-	args = append(args, "-frames:v", "1", "-vf", "scale=640:-2,format=yuvj420p", "-q:v", "4", "-f", "image2", "pipe:1")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	args = append(args, "-frames:v", "1", "-vf", fmt.Sprintf("scale=%d:-2,format=yuvj420p", width), "-q:v", "5", "-f", "image2", "pipe:1")
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	data, err := exec.CommandContext(ctx, toolBin("ffmpeg"), args...).Output()
-	if err != nil || len(data) < 800 {
+	if err != nil || len(data) < minSize {
 		return nil
 	}
 	return data
@@ -1690,6 +1769,9 @@ func streamArgs(path string, start float64, quality, audio int, burn *int) []str
 }
 
 func subsVTT(path string, id int) []byte {
+	if id >= sidecarIDBase {
+		return sidecarVTT(path, id)
+	}
 	info := libraryByPath()[relOf(path)]
 	if info == nil {
 		return nil
@@ -1746,127 +1828,6 @@ type progressEntry struct {
 }
 
 var progressMu sync.Mutex
-
-func progressFile() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return filepath.Join(cache, "progress.json")
-	}
-	return filepath.Join(home, ".gomoov", "progress.json")
-}
-
-func readProgress() map[string]progressEntry {
-	progressMu.Lock()
-	defer progressMu.Unlock()
-	out := map[string]progressEntry{}
-	b, err := os.ReadFile(progressFile())
-	if err != nil {
-		return out
-	}
-	_ = json.Unmarshal(b, &out)
-	return out
-}
-
-func writeProgressEntry(abs string, entry *progressEntry) error {
-	if abs == "" {
-		return errors.New("empty path")
-	}
-	progressMu.Lock()
-	defer progressMu.Unlock()
-	file := progressFile()
-	all := map[string]progressEntry{}
-	if b, err := os.ReadFile(file); err == nil {
-		_ = json.Unmarshal(b, &all)
-	}
-	if entry == nil {
-		delete(all, abs)
-	} else {
-		all[abs] = *entry
-	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-		return err
-	}
-	b, err := json.Marshal(all)
-	if err != nil {
-		return err
-	}
-	tmp := file + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, file)
-}
-
-func forgetProgressUnder(dir string) {
-	dir, err := filepath.Abs(dir)
-	if err != nil {
-		return
-	}
-	progressMu.Lock()
-	defer progressMu.Unlock()
-	file := progressFile()
-	all := map[string]progressEntry{}
-	b, err := os.ReadFile(file)
-	if err != nil {
-		return
-	}
-	if json.Unmarshal(b, &all) != nil {
-		return
-	}
-	changed := false
-	for path := range all {
-		if hasPathPrefix(path, dir) {
-			delete(all, path)
-			changed = true
-		}
-	}
-	if !changed {
-		return
-	}
-	out, err := json.Marshal(all)
-	if err != nil {
-		return
-	}
-	tmp := file + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o644); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, file)
-}
-
-func serveProgress(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		user := currentUser(r)
-		all := readProgress()
-		visible := map[string]progressEntry{}
-		for abs, entry := range all {
-			if canSeePath(user, abs) {
-				visible[abs] = entry
-			}
-		}
-		writeJSON(w, visible)
-		return
-	}
-	var body struct {
-		Path  string         `json:"path"`
-		Entry *progressEntry `json:"entry"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "bad json", http.StatusBadRequest)
-		return
-	}
-	full, err := safeVideo(body.Path)
-	if err != nil || !canSeePath(currentUser(r), full) {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	abs, _ := filepath.Abs(full)
-	if err := writeProgressEntry(abs, body.Entry); err != nil {
-		http.Error(w, "could not save", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, map[string]bool{"ok": true})
-}
 
 func shortPath(path string) string {
 	full, err := filepath.Abs(path)

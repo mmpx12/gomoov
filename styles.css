@@ -699,6 +699,8 @@ label.check,
 
 .continue-remove:hover { color: var(--accent); }
 
+a.continue-remove { text-decoration: none; }
+
 .shelf { margin-bottom: 28px; }
 
 #later-section {
@@ -1120,6 +1122,29 @@ h1 {
   background: rgba(0, 0, 0, 0.72);
 }
 
+.up-next-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+}
+
+#up-next-kicker {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+#up-next-title, #up-next-count { margin: 0; }
+
+#series-view { padding-top: 8px; }
+
+#series-view h1 { margin: 8px 0 4px; }
+
+#series-continue { margin: 8px 0 18px; }
+
 .player-message button, .text-btn {
   background: var(--accent);
   color: white;
@@ -1259,6 +1284,28 @@ h1 {
   padding: 3px 6px;
   border-radius: 4px;
   pointer-events: none;
+  z-index: 2;
+}
+
+.timeline-preview {
+  position: absolute;
+  bottom: 28px;
+  width: 168px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 3;
+}
+
+.timeline-preview img {
+  display: block;
+  width: 100%;
+  height: 94px;
+  object-fit: cover;
+  background: #111;
 }
 
 .control-row {
