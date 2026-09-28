@@ -63,6 +63,7 @@ let sortKey = "name";
 let sortDesc = false;
 let groupByFolder = false;
 let mineOnly = false;
+let videoPlayer = false;
 let continueCollapsed = false;
 let current = null;
 let streamStart = 0;
@@ -372,10 +373,10 @@ function syncMineControl() {
   const wrap = document.getElementById("mine-only-wrap");
   const box = document.getElementById("mine-only");
   const menu = document.getElementById("account-mine");
-  if (wrap) wrap.hidden = !me;
+  if (wrap) wrap.hidden = videoPlayer || !me;
   if (box) box.checked = mineOnly;
   if (menu) {
-    menu.hidden = !me;
+    menu.hidden = videoPlayer || !me;
     menu.textContent = mineOnly ? "Show all videos" : "My videos";
     menu.setAttribute("aria-pressed", mineOnly ? "true" : "false");
   }
@@ -742,6 +743,10 @@ function route() {
     return;
   }
   const { pathname, video: path, user: userID } = parseRoute();
+  if (videoPlayer && (pathname === "/login" || pathname === "/users")) {
+    location.hash = "/";
+    return;
+  }
   if (pathname === "/login") {
     if (me) {
       location.hash = "/";
@@ -1747,7 +1752,10 @@ async function loadMe() {
     return;
   }
   const data = await response.json();
+  videoPlayer = !!data.videoPlayer;
   me = data.user || null;
+  const account = document.querySelector(".account");
+  if (account) account.hidden = videoPlayer;
   renderAccount();
 }
 

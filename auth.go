@@ -390,14 +390,16 @@ func publicUser(u userRecord, adminView bool) map[string]any {
 }
 
 func mePayload(u *userRecord) map[string]any {
+	out := map[string]any{"user": nil, "videoPlayer": videoPlayer}
 	if u == nil {
-		return map[string]any{"user": nil}
+		return out
 	}
 	pub := publicUser(*u, false)
 	if u.Admin {
 		pub["resetCount"] = resetCount()
 	}
-	return map[string]any{"user": pub}
+	out["user"] = pub
+	return out
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, dest any) bool {
@@ -1019,6 +1021,9 @@ func metaFor(abs string) videoMeta {
 func canSeeMeta(user *userRecord, meta videoMeta) bool {
 	if !meta.Private {
 		return true
+	}
+	if videoPlayer {
+		return showPrivate
 	}
 	if user == nil {
 		return false

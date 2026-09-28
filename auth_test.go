@@ -213,6 +213,55 @@ func TestAuthPrivacyAndPasswords(t *testing.T) {
 	}
 }
 
+func TestVideoPlayerHidesPrivateUnlessAsked(t *testing.T) {
+	lib := t.TempDir()
+	ups := t.TempDir()
+	oldRoot, oldUpload := root, uploadRoot
+	oldPlayer, oldShow := videoPlayer, showPrivate
+	t.Cleanup(func() {
+		root, uploadRoot = oldRoot, oldUpload
+		videoPlayer, showPrivate = oldPlayer, oldShow
+		includeDirs, excludeDirs = nil, nil
+	})
+	root = lib
+	uploadRoot = ups
+	includeDirs, excludeDirs = nil, nil
+	pub := filepath.Join(lib, "pub.mkv")
+	if err := os.WriteFile(pub, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id := "22222222-2222-4222-8222-222222222222"
+	mine := filepath.Join(ups, id, "mine.mkv")
+	if err := os.MkdirAll(filepath.Dir(mine), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mine, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	owner := &userRecord{ID: id}
+	admin := &userRecord{Admin: true}
+	videoPlayer = true
+	showPrivate = false
+	if !canSeePath(nil, pub) {
+		t.Fatal("public video hidden in player mode")
+	}
+	if canSeePath(owner, mine) || canSeePath(admin, mine) || canSeePath(nil, mine) {
+		t.Fatal("private video visible in player mode")
+	}
+	showPrivate = true
+	if !canSeePath(nil, mine) {
+		t.Fatal("show-private did not reveal the upload")
+	}
+	videoPlayer = false
+	showPrivate = true
+	if canSeePath(nil, mine) {
+		t.Fatal("show-private revealed a private video outside player mode")
+	}
+	if !canSeePath(owner, mine) || !canSeePath(admin, mine) {
+		t.Fatal("owner or admin lost a private video in normal mode")
+	}
+}
+
 func TestBanAndDeleteUser(t *testing.T) {
 	withAuth(t)
 	admin := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": "admin"}, nil))

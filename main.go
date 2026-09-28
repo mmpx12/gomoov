@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.7"
+const version = "1.0.8"
 
 var (
 	root  string
@@ -90,6 +90,11 @@ var (
 	// An empty include list scans the whole library.
 	includeDirs []string
 	excludeDirs []string
+
+	// videoPlayer hides accounts and private uploads, like the original player.
+	// showPrivate includes those uploads while video player mode is on.
+	videoPlayer bool
+	showPrivate bool
 )
 
 // multiFlag collects repeated flag values and comma-separated values.
@@ -130,6 +135,8 @@ Flags:
   -H, --host ADDR            listen address (overrides HOST, default 0.0.0.0)
   -p, --port PORT            listen port (overrides PORT, default 8080)
   -V, --version              print version and exit
+  -v, --videoplayer          simple player: hide accounts and private videos
+      --show-private         with -v, also show private videos (-p is the port)
   -m, --movie PATH           open this video in a browser
   -i, --include DIR          only scan these directories
   -e, --exclude DIR          skip these directories
@@ -195,6 +202,9 @@ func main() {
 	flag.StringVar(&portFlag, "p", "", "listen port (overrides PORT)")
 	flag.BoolVar(&versionFlag, "version", false, "print version and exit")
 	flag.BoolVar(&versionFlag, "V", false, "print version and exit")
+	flag.BoolVar(&videoPlayer, "videoplayer", false, "simple player without accounts or private videos")
+	flag.BoolVar(&videoPlayer, "v", false, "simple player without accounts or private videos")
+	flag.BoolVar(&showPrivate, "show-private", false, "with -v, include private videos")
 	flag.StringVar(&movieFlag, "movie", "", "open this video in a browser")
 	flag.StringVar(&movieFlag, "m", "", "open this video in a browser")
 	flag.Var(&includes, "include", "only scan these directories")
@@ -281,6 +291,13 @@ func main() {
 	}
 	if len(excludeDirs) > 0 {
 		log.Printf("excluding %s", strings.Join(excludeDirs, ", "))
+	}
+	if videoPlayer {
+		if showPrivate {
+			log.Printf("video player mode, including private videos")
+		} else {
+			log.Printf("video player mode, private videos hidden")
+		}
 	}
 
 	go func() {
