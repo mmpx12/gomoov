@@ -5,3 +5,6 @@
 !app.js
 !styles.css
 !docker-entrypoint.sh
+!brand
+!brand/
+!brand/*.png

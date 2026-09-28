@@ -553,12 +553,23 @@ label.check,
   min-width: 0;
 }
 
-.brand-mark {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
+.brand-logo {
+  display: none;
+  height: 52px;
+  width: auto;
+}
+
+html:not([data-theme]) .brand-logo[data-brand="dark"],
+html[data-theme="dark"] .brand-logo[data-brand="dark"],
+html[data-theme="white"] .brand-logo[data-brand="white"],
+html[data-theme="cyber-green"] .brand-logo[data-brand="cyber-green"],
+html[data-theme="fancy"] .brand-logo[data-brand="fancy"],
+html[data-theme="neon"] .brand-logo[data-brand="neon"],
+html[data-theme="cyberpunk"] .brand-logo[data-brand="cyberpunk"],
+html[data-theme="retro"] .brand-logo[data-brand="retro"],
+html[data-theme="ocean"] .brand-logo[data-brand="ocean"],
+html[data-theme="sunset"] .brand-logo[data-brand="sunset"] {
+  display: block;
 }
 
 .search {
@@ -1573,7 +1584,7 @@ h1 {
     padding: 0 4px 0 12px;
   }
 
-  .brand { font-size: 1.05rem; }
+  .brand-logo { height: 40px; }
 
   .search-toggle { display: grid; place-items: center; }
 
