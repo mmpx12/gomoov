@@ -34,7 +34,10 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.15"
+const version = "1.0.16"
+
+// probeVer invalidates cached probes when the stored shape changes.
+const probeVer = 2
 
 var (
 	root  string
@@ -72,6 +75,8 @@ var (
 	libraryMu    sync.Mutex
 	library      []videoInfo
 	libraryStamp string
+	memProbeMu   sync.Mutex
+	memProbe     = map[string]memHit{}
 
 	probeMu    sync.Mutex
 	probeCache map[string]probeEntry
@@ -96,6 +101,11 @@ var (
 	videoPlayer = true
 	showPrivate bool
 )
+
+type memHit struct {
+	stamp string
+	info  videoInfo
+}
 
 // multiFlag collects repeated flag values and comma-separated values.
 type multiFlag []string
@@ -140,6 +150,7 @@ Flags:
   -U, --user-mode            accounts, uploads, and private videos
       --show-private         in the simple player, also show private videos
   -m, --movie PATH           open this video in a browser
+  -L, --library DIR          movie folder (default: the current directory)
   -i, --include DIR          only scan these directories
   -e, --exclude DIR          skip these directories
 
@@ -158,6 +169,8 @@ type videoInfo struct {
 	Duration    float64 `json:"duration"`
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
+	HasCover    bool    `json:"hasCover,omitempty"`
+	CoverIndex  int     `json:"coverIndex,omitempty"`
 	VideoCodec  string  `json:"videoCodec"`
 	AudioCodec  string  `json:"audioCodec"`
 	AudioTracks []track `json:"audioTracks"`
@@ -189,11 +202,12 @@ type sub struct {
 
 type probeEntry struct {
 	Stamp string     `json:"stamp"`
+	Ver   int        `json:"ver"`
 	Info  *videoInfo `json:"info"`
 }
 
 func main() {
-	var hostFlag, portFlag, movieFlag string
+	var hostFlag, portFlag, movieFlag, libraryFlag string
 	var versionFlag, userModeFlag bool
 	var includes, excludes multiFlag
 
@@ -209,6 +223,8 @@ func main() {
 	flag.BoolVar(&showPrivate, "show-private", false, "in the simple player, include private videos")
 	flag.StringVar(&movieFlag, "movie", "", "open this video in a browser")
 	flag.StringVar(&movieFlag, "m", "", "open this video in a browser")
+	flag.StringVar(&libraryFlag, "library", "", "movie folder (default: the current directory)")
+	flag.StringVar(&libraryFlag, "L", "", "movie folder (default: the current directory)")
 	flag.Var(&includes, "include", "only scan these directories")
 	flag.Var(&includes, "i", "only scan these directories")
 	flag.Var(&excludes, "exclude", "skip these directories")
@@ -226,13 +242,20 @@ func main() {
 	}
 
 	var err error
-	root, err = os.Getwd()
-	if err != nil {
-		log.Fatal(err)
+	if libraryFlag != "" {
+		root = expandUser(libraryFlag)
+	} else {
+		root, err = os.Getwd()
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	root, err = filepath.Abs(root)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if st, err := os.Stat(root); err != nil || !st.IsDir() {
+		log.Fatalf("library %s is not a directory", root)
 	}
 	if err := prepareFilters(includes, excludes); err != nil {
 		log.Fatal(err)
@@ -243,6 +266,7 @@ func main() {
 	if err := prepareFFmpeg(); err != nil {
 		log.Fatal(err)
 	}
+	detectHWEncoder()
 	if err := loadSettings(); err != nil {
 		log.Fatal(err)
 	}
@@ -255,7 +279,7 @@ func main() {
 	}
 	cache = os.Getenv("MOOVIES_CACHE")
 	if cache == "" {
-		cache = "/tmp/moovies-cache"
+		cache = filepath.Join(configDir, "cache")
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -662,6 +686,22 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
 		serveVisibility(w, r)
 		return
+	case "/api/download":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveDownload(w, r)
+		return
+	case "/api/video/transfer":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveTransfer(w, r)
+		return
 	}
 	if r.URL.Path == "/api/progress" && (r.Method == http.MethodGet || r.Method == http.MethodPut || r.Method == http.MethodPost) {
 		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
@@ -740,8 +780,27 @@ func deleteVideo(w http.ResponseWriter, r *http.Request) {
 	abs, _ := filepath.Abs(path)
 	forgetVideo(abs)
 	_ = writeProgressEntry(abs, nil)
+	who := "anonymous"
+	if u := currentUser(r); u != nil && u.Username != "" {
+		who = u.Username
+	}
+	appendAudit(who, "delete", abs)
 	log.Printf("%s removed %s", clientIP(r), relOf(path))
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func appendAudit(who, action, path string) {
+	if configDir == "" {
+		return
+	}
+	line := fmt.Sprintf("%s\t%s\t%s\t%s\n", time.Now().Format(time.RFC3339), who, action, path)
+	f, err := os.OpenFile(filepath.Join(configDir, "audit.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Printf("audit: %v", err)
+		return
+	}
+	_, _ = f.WriteString(line)
+	_ = f.Close()
 }
 
 func clientIP(r *http.Request) string {
@@ -840,10 +899,17 @@ func serveStream(w http.ResponseWriter, r *http.Request, q url.Values) {
 		audio = 0
 	}
 	info := libraryByPath()[relOf(path)]
+	burn := burnSubIndex(path, q.Get("s"))
+	if info == nil || !copiesVideo(info, quality, burn) {
+		if !acquireTranscode(r.Context()) {
+			http.Error(w, "transcode queue cancelled", http.StatusServiceUnavailable)
+			return
+		}
+		defer releaseTranscode()
+	}
 	if info != nil && info.Duration > 0 && start > info.Duration-1 {
 		start = math.Max(0, info.Duration-1.5)
 	}
-	burn := burnSubIndex(path, q.Get("s"))
 	qLabel := "orig"
 	if quality != 0 {
 		qLabel = strconv.Itoa(quality)
@@ -1135,9 +1201,24 @@ func getLibrary() []videoInfo {
 	}
 	var videos []videoInfo
 	for _, p := range files {
+		st, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		stamp := fmt.Sprintf("%d:%d", st.Size(), st.ModTime().UnixNano())
+		memProbeMu.Lock()
+		hit, ok := memProbe[p]
+		memProbeMu.Unlock()
+		if ok && hit.stamp == stamp && hit.info.Duration > 0 {
+			videos = append(videos, hit.info)
+			continue
+		}
 		info := probe(p)
 		if info != nil && info.Duration > 0 {
 			videos = append(videos, *info)
+			memProbeMu.Lock()
+			memProbe[p] = memHit{stamp: stamp, info: *info}
+			memProbeMu.Unlock()
 		}
 	}
 	if videos == nil {
@@ -1200,7 +1281,7 @@ func probe(path string) *videoInfo {
 	probeMu.Lock()
 	hit, ok := c[rel]
 	probeMu.Unlock()
-	if ok && hit.Stamp == stamp && hit.Info != nil && hit.Info.AudioTracks != nil {
+	if ok && hit.Stamp == stamp && hit.Ver == probeVer && hit.Info != nil && hit.Info.AudioTracks != nil {
 		if hit.Info.DisplayPath == "" {
 			hit.Info.DisplayPath = shortPath(path)
 		}
@@ -1220,11 +1301,14 @@ func probe(path string) *videoInfo {
 	}
 	var doc struct {
 		Streams []struct {
-			CodecType string            `json:"codec_type"`
-			CodecName string            `json:"codec_name"`
-			Width     int               `json:"width"`
-			Height    int               `json:"height"`
-			Tags      map[string]string `json:"tags"`
+			CodecType   string `json:"codec_type"`
+			CodecName   string `json:"codec_name"`
+			Width       int    `json:"width"`
+			Height      int    `json:"height"`
+			Disposition struct {
+				AttachedPic int `json:"attached_pic"`
+			} `json:"disposition"`
+			Tags map[string]string `json:"tags"`
 		} `json:"streams"`
 		Format struct {
 			Duration string            `json:"duration"`
@@ -1241,16 +1325,28 @@ func probe(path string) *videoInfo {
 		Height    int
 		Tags      map[string]string
 	}
+	coverIndex := -1
+	videoOrd := 0
 	for _, s := range doc.Streams {
-		if s.CodecType == "video" && video == nil {
+		if s.CodecType != "video" {
+			continue
+		}
+		if s.Disposition.AttachedPic != 0 {
+			if coverIndex < 0 {
+				coverIndex = videoOrd
+			}
+			videoOrd++
+			continue
+		}
+		if video == nil {
 			video = &struct {
 				CodecName string
 				Width     int
 				Height    int
 				Tags      map[string]string
 			}{s.CodecName, s.Width, s.Height, s.Tags}
-			break
 		}
+		videoOrd++
 	}
 	if video == nil {
 		return nil
@@ -1295,6 +1391,7 @@ func probe(path string) *videoInfo {
 		Path: rel, Name: filepath.Base(path), Size: st.Size(),
 		Mtime: float64(st.ModTime().UnixNano()) / 1e9, Duration: duration,
 		Width: video.Width, Height: video.Height, VideoCodec: video.CodecName,
+		HasCover: coverIndex >= 0, CoverIndex: max(coverIndex, 0),
 		AudioCodec: firstAudio, AudioTracks: audios, Subtitles: subs, StreamTitle: title,
 		DisplayPath: shortPath(path),
 		AbsPath:     absPath(path),
@@ -1303,7 +1400,7 @@ func probe(path string) *videoInfo {
 	if probeCache == nil {
 		probeCache = map[string]probeEntry{}
 	}
-	probeCache[rel] = probeEntry{Stamp: stamp, Info: info}
+	probeCache[rel] = probeEntry{Stamp: stamp, Ver: probeVer, Info: info}
 	saveProbeCache(probeCache)
 	probeMu.Unlock()
 	return info
@@ -1346,6 +1443,19 @@ func thumbLock(key string) *sync.Mutex {
 	return thumbLocks[key]
 }
 
+func ffmpegJPEG(input []string) []byte {
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
+	args = append(args, input...)
+	args = append(args, "-frames:v", "1", "-vf", "scale=640:-2,format=yuvj420p", "-q:v", "4", "-f", "image2", "pipe:1")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	data, err := exec.CommandContext(ctx, toolBin("ffmpeg"), args...).Output()
+	if err != nil || len(data) < 800 {
+		return nil
+	}
+	return data
+}
+
 func thumbFile(path string) []byte {
 	info := libraryByPath()[relOf(path)]
 	duration := 30.0
@@ -1356,7 +1466,7 @@ func thumbFile(path string) []byte {
 	if err != nil {
 		return nil
 	}
-	key := fmt.Sprintf("%s:%d:%d:v2", relOf(path), st.Size(), st.ModTime().UnixNano())
+	key := fmt.Sprintf("%s:%d:%d:v3", relOf(path), st.Size(), st.ModTime().UnixNano())
 	sum := sha1.Sum([]byte(key))
 	dest := filepath.Join(cache, "thumbs", fmt.Sprintf("%x.jpg", sum))
 	lock := thumbLock(dest)
@@ -1366,7 +1476,32 @@ func thumbFile(path string) []byte {
 		return b
 	}
 	_ = os.MkdirAll(filepath.Dir(dest), 0o755)
-	samples := []float64{8}
+
+	try := func(input []string) []byte {
+		thumbSlots <- struct{}{}
+		data := ffmpegJPEG(input)
+		<-thumbSlots
+		return data
+	}
+	if info != nil && info.HasCover {
+		if data := try([]string{"-i", path, "-map", fmt.Sprintf("0:v:%d", info.CoverIndex)}); data != nil {
+			_ = os.WriteFile(dest, data, 0o644)
+			return data
+		}
+	}
+	poster := 8.0
+	if duration > 1 {
+		poster = math.Min(8, math.Max(1, duration*0.1))
+		if poster > duration-0.5 {
+			poster = math.Max(0, duration*0.1)
+		}
+	}
+	if data := try([]string{"-ss", fmt.Sprintf("%.3f", poster), "-i", path}); data != nil {
+		_ = os.WriteFile(dest, data, 0o644)
+		return data
+	}
+
+	samples := []float64{}
 	for _, ratio := range []float64{0.12, 0.28, 0.45} {
 		at := math.Min(math.Max(1, duration*ratio), math.Max(1, duration-1))
 		samples = append(samples, at)
@@ -1374,14 +1509,8 @@ func thumbFile(path string) []byte {
 	var best []byte
 	thumbSlots <- struct{}{}
 	for _, ss := range samples {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		cmd := exec.CommandContext(ctx, toolBin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
-			"-ss", fmt.Sprintf("%.3f", ss), "-i", path,
-			"-frames:v", "1", "-vf", "scale=640:-2,format=yuvj420p",
-			"-q:v", "4", "-f", "image2", "pipe:1")
-		data, err := cmd.Output()
-		cancel()
-		if err == nil && len(data) > len(best) {
+		data := ffmpegJPEG([]string{"-ss", fmt.Sprintf("%.3f", ss), "-i", path})
+		if len(data) > len(best) {
 			best = data
 		}
 	}
@@ -1498,8 +1627,15 @@ func streamArgs(path string, start float64, quality, audio int, burn *int) []str
 		audioCodec = info.AudioCodec
 	}
 	scale := quality != 0 && height != 0 && quality < height-8
-	transcode := videoCodec != "h264" || scale || burn != nil
-	args := []string{toolBin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", fmt.Sprintf("%.3f", start)}
+	tricky := scale || burn != nil
+	transcode := videoCodec != "h264" || tricky
+	// Burned-in subtitles and a scale stay on libx264. Hardware is encode-only.
+	useHW := transcode && !tricky && hwEncoder != ""
+	args := []string{toolBin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin"}
+	if useHW && hwEncoder == "vaapi" {
+		args = append(args, "-vaapi_device", "/dev/dri/renderD128")
+	}
+	args = append(args, "-ss", fmt.Sprintf("%.3f", start))
 	if ffmpegHasReadrate() {
 		args = append(args, "-readrate", "1.5")
 	}
@@ -1513,9 +1649,16 @@ func streamArgs(path string, start float64, quality, audio int, burn *int) []str
 		args = append(args, "-map", "0:v:0", "-vf", fmt.Sprintf("scale=-2:%d", quality))
 	default:
 		args = append(args, "-map", "0:v:0")
+		if useHW && hwEncoder == "vaapi" {
+			args = append(args, "-vf", "format=nv12,hwupload")
+		}
 	}
 	if transcode {
-		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "23", "-pix_fmt", "yuv420p", "-profile:v", "high")
+		if useHW {
+			args = append(args, videoEncodeArgs()...)
+		} else {
+			args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "23", "-pix_fmt", "yuv420p", "-profile:v", "high")
+		}
 	} else {
 		args = append(args, "-c:v", "copy")
 	}

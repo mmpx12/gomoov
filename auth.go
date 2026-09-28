@@ -87,62 +87,92 @@ func loadAuth() error {
 	if err := os.MkdirAll(uploadRoot, 0o700); err != nil {
 		return err
 	}
-	authMu.Lock()
-	defer authMu.Unlock()
-	users = nil
-	sessions = map[string]sessionRecord{}
-	visibility = map[string]visRecord{}
 	usersPath := filepath.Join(configDir, "users.json")
+	var loaded []userRecord
+	fresh := false
 	if b, err := os.ReadFile(usersPath); err == nil {
-		if err := json.Unmarshal(b, &users); err != nil {
+		if err := json.Unmarshal(b, &loaded); err != nil {
 			return fmt.Errorf("users.json: %w", err)
 		}
-		if len(users) == 0 {
+		if len(loaded) == 0 {
 			return errors.New("users.json has no accounts")
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	} else if errors.Is(err, os.ErrNotExist) {
+		fresh = true
+	} else {
 		return err
 	}
+	var salt, hash string
+	var iter int
+	var id string
+	if fresh {
+		var err error
+		salt, hash, iter, err = hashPassword("admin")
+		if err != nil {
+			return err
+		}
+		id, err = newID()
+		if err != nil {
+			return err
+		}
+	}
+	// Password checks stay outside authMu. The default admin password is
+	// still "admin" on older installs, and those accounts must change it.
+	forceDefault := false
+	for _, u := range loaded {
+		if strings.EqualFold(u.Username, "admin") && verifyPassword("admin", u.PassSalt, u.PassHash, u.PassIter) {
+			forceDefault = true
+			break
+		}
+	}
+	sessionsLoaded := map[string]sessionRecord{}
 	if b, err := os.ReadFile(filepath.Join(configDir, "sessions.json")); err == nil {
-		_ = json.Unmarshal(b, &sessions)
+		_ = json.Unmarshal(b, &sessionsLoaded)
 	}
-	if sessions == nil {
-		sessions = map[string]sessionRecord{}
-	}
+	visibilityLoaded := map[string]visRecord{}
 	if b, err := os.ReadFile(filepath.Join(configDir, "visibility.json")); err == nil {
-		_ = json.Unmarshal(b, &visibility)
+		_ = json.Unmarshal(b, &visibilityLoaded)
 	}
-	if visibility == nil {
-		visibility = map[string]visRecord{}
-	}
+	authMu.Lock()
+	defer authMu.Unlock()
+	users = loaded
+	sessions = sessionsLoaded
+	visibility = visibilityLoaded
 	now := time.Now()
 	for token, sess := range sessions {
 		if sess.UserID == "" || !now.Before(sess.Expires) {
 			delete(sessions, token)
 		}
 	}
-	if len(users) == 0 {
-		salt, hash, iter, err := hashPassword("admin")
-		if err != nil {
-			return err
-		}
-		id, err := newID()
-		if err != nil {
-			return err
-		}
+	if fresh {
 		users = []userRecord{{
-			ID:        id,
-			Username:  "admin",
-			PassHash:  hash,
-			PassSalt:  salt,
-			PassIter:  iter,
-			Admin:     true,
-			CanUpload: true,
+			ID:                 id,
+			Username:           "admin",
+			PassHash:           hash,
+			PassSalt:           salt,
+			PassIter:           iter,
+			Admin:              true,
+			CanUpload:          true,
+			MustChangePassword: true,
 		}}
 		if err := saveUsersLocked(); err != nil {
 			return err
 		}
-		log.Printf("created default admin account admin / admin")
+		log.Printf("created default admin account admin / admin; a new password is required")
+	} else if forceDefault {
+		changed := false
+		for i := range users {
+			if strings.EqualFold(users[i].Username, "admin") && !users[i].MustChangePassword {
+				users[i].MustChangePassword = true
+				changed = true
+			}
+		}
+		if changed {
+			if err := saveUsersLocked(); err != nil {
+				return err
+			}
+			log.Printf("admin password is still admin; a new password is required")
+		}
 	}
 	for _, u := range users {
 		_ = os.MkdirAll(filepath.Join(uploadRoot, u.ID), 0o700)
@@ -960,6 +990,139 @@ func serveVisibility(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "private": body.Private})
+}
+
+func serveDownload(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil {
+		writeAPIError(w, http.StatusUnauthorized, "sign in required")
+		return
+	}
+	full, err := safeVideo(r.URL.Query().Get("path"))
+	if err != nil || !canSeePath(u, full) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	abs, _ := filepath.Abs(full)
+	owner, ok := uploadOwner(abs)
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "only an uploaded video can be downloaded")
+		return
+	}
+	if !u.Admin && u.ID != owner {
+		writeAPIError(w, http.StatusForbidden, "you cannot download this video")
+		return
+	}
+	name := strings.ReplaceAll(filepath.Base(abs), `"`, "")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	http.ServeFile(w, r, abs)
+}
+
+func serveTransfer(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil {
+		writeAPIError(w, http.StatusUnauthorized, "sign in required")
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+		To   string `json:"to"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	full, err := safeVideo(body.Path)
+	if err != nil || !canSeePath(u, full) {
+		writeAPIError(w, http.StatusNotFound, "not found")
+		return
+	}
+	abs, _ := filepath.Abs(full)
+	owner, ok := uploadOwner(abs)
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "only an uploaded video can be handed over")
+		return
+	}
+	if !u.Admin && u.ID != owner {
+		writeAPIError(w, http.StatusForbidden, "you cannot hand over this video")
+		return
+	}
+	target, ok := findUser(body.To)
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "No account with that name.")
+		return
+	}
+	if target.Banned {
+		writeAPIError(w, http.StatusBadRequest, "That account is banned.")
+		return
+	}
+	if target.ID == owner {
+		writeAPIError(w, http.StatusBadRequest, "That video already belongs to this account.")
+		return
+	}
+	dir := filepath.Join(uploadRoot, target.ID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "could not hand over the video")
+		return
+	}
+	dest, err := exclusiveVideoPath(dir, filepath.Base(abs))
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "could not hand over the video")
+		return
+	}
+	if err := moveFile(abs, dest); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "could not hand over the video")
+		return
+	}
+	newAbs, _ := filepath.Abs(dest)
+	authMu.Lock()
+	rec, found := visibility[abs]
+	private := true
+	if found {
+		private = rec.Private
+	}
+	delete(visibility, abs)
+	visibility[newAbs] = visRecord{OwnerID: target.ID, Private: private}
+	err = saveVisibilityLocked()
+	authMu.Unlock()
+	if err != nil {
+		_ = moveFile(newAbs, abs)
+		writeAPIError(w, http.StatusInternalServerError, "could not hand over the video")
+		return
+	}
+	if prog, ok := readProgress()[abs]; ok {
+		saved := prog
+		_ = writeProgressEntry(newAbs, &saved)
+		_ = writeProgressEntry(abs, nil)
+	}
+	invalidateLibrary()
+	log.Printf("%s handed %s to %s", clientIP(r), relOf(newAbs), target.Username)
+	writeJSON(w, map[string]any{"ok": true, "path": relOf(newAbs), "private": private})
+}
+
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil || closeErr != nil {
+		_ = os.Remove(dst)
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	}
+	return os.Remove(src)
 }
 
 func forgetVideo(abs string) {

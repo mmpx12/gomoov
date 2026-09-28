@@ -8,7 +8,7 @@ Type=simple
 @USER_LINE@
 @HOME_LINE@
 WorkingDirectory=@LIBRARY@
-ExecStart=@BINDIR@/gomoov -U
+ExecStart=@BINDIR@/gomoov -U -L @LIBRARY@ -H @HOST@ -p @PORT@ @EXTRA@
 Restart=on-failure
 RestartSec=2
 

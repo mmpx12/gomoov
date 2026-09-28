@@ -1,7 +1,15 @@
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 LIBRARY ?= $(CURDIR)
+HOST ?= 0.0.0.0
+PORT ?= 8080
 SERVICE ?= gomoov
+# SHOW_PRIVATE=1 adds --show-private to the systemd unit (simple player only).
+SHOW_PRIVATE ?=
+EXTRA :=
+ifneq ($(SHOW_PRIVATE),)
+EXTRA := --show-private
+endif
 # Static GPL build (includes libx264). linux x86_64. Override for another arch.
 FFMPEG_URL ?= https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
 
@@ -33,6 +41,7 @@ install: gomoov
 	install -m 755 gomoov "$(BINDIR)/gomoov"
 
 # LIBRARY is the movie folder (default: the directory you run make from).
+# HOST, PORT, and SHOW_PRIVATE=1 are written into the unit.
 # Both targets install the binary and start gomoov -U.
 install-user-service: install
 	@set -e; \
@@ -41,6 +50,9 @@ install-user-service: install
 	sed \
 		-e 's|@BINDIR@|$(BINDIR)|g' \
 		-e 's|@LIBRARY@|$(LIBRARY)|g' \
+		-e 's|@HOST@|$(HOST)|g' \
+		-e 's|@PORT@|$(PORT)|g' \
+		-e 's|@EXTRA@|$(EXTRA)|g' \
 		-e 's|@WANTED@|default.target|g' \
 		-e 's|@USER_LINE@||g' \
 		-e 's|@HOME_LINE@||g' \
@@ -62,6 +74,9 @@ install-service: install
 	sed \
 		-e 's|@BINDIR@|$(BINDIR)|g' \
 		-e 's|@LIBRARY@|$(LIBRARY)|g' \
+		-e 's|@HOST@|$(HOST)|g' \
+		-e 's|@PORT@|$(PORT)|g' \
+		-e 's|@EXTRA@|$(EXTRA)|g' \
 		-e 's|@WANTED@|multi-user.target|g' \
 		-e "s|@USER_LINE@|User=$$run_user|g" \
 		-e "s|@HOME_LINE@|Environment=HOME=$$run_home|g" \

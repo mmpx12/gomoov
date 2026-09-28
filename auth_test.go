@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,15 @@ func withAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := loadAuth(); err != nil {
+		t.Fatal(err)
+	}
+	authMu.Lock()
+	for i := range users {
+		users[i].MustChangePassword = false
+	}
+	err := saveUsersLocked()
+	authMu.Unlock()
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -335,6 +345,153 @@ func TestBanAndDeleteUser(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("upload directory still present: %v", err)
+	}
+}
+
+func TestFreshAdminMustChange(t *testing.T) {
+	withAuth(t)
+	if err := os.Remove(filepath.Join(configDir, "users.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadAuth(); err != nil {
+		t.Fatal(err)
+	}
+	admin, ok := findUser("admin")
+	if !ok || !admin.MustChangePassword {
+		t.Fatalf("fresh admin must change password, got %+v", admin.MustChangePassword)
+	}
+	cookie := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": "admin"}, nil))
+	blocked := sendJSON(http.MethodGet, "/api/users", nil, cookie)
+	if blocked.Code != http.StatusForbidden || !bytes.Contains(blocked.Body.Bytes(), []byte("password_change_required")) {
+		t.Fatalf("fresh admin library status %d %s", blocked.Code, blocked.Body.String())
+	}
+}
+
+func TestExistingAdminPasswordForcesChange(t *testing.T) {
+	withAuth(t)
+	if err := loadAuth(); err != nil {
+		t.Fatal(err)
+	}
+	admin, ok := findUser("admin")
+	if !ok || !admin.MustChangePassword {
+		t.Fatal("existing admin/admin was not forced to change")
+	}
+	cookie := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": "admin"}, nil))
+	blocked := sendJSON(http.MethodGet, "/api/users", nil, cookie)
+	if blocked.Code != http.StatusForbidden {
+		t.Fatalf("status %d %s", blocked.Code, blocked.Body.String())
+	}
+	changed := postJSON("/api/password", map[string]string{"current": "admin", "next": "better-pass"}, cookie)
+	if changed.Code != http.StatusOK {
+		t.Fatalf("change %d %s", changed.Code, changed.Body.String())
+	}
+	if rec := sendJSON(http.MethodGet, "/api/users", nil, cookie); rec.Code != http.StatusOK {
+		t.Fatalf("after change %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDownloadTransferAndAudit(t *testing.T) {
+	withAuth(t)
+	admin := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": "admin"}, nil))
+	adaRec := postJSON("/api/users", map[string]any{
+		"username": "ada", "password": "secret", "canUpload": true,
+	}, admin)
+	beeRec := postJSON("/api/users", map[string]any{
+		"username": "bee", "password": "secret", "canUpload": true,
+	}, admin)
+	if adaRec.Code != http.StatusOK || beeRec.Code != http.StatusOK {
+		t.Fatalf("users %d %d", adaRec.Code, beeRec.Code)
+	}
+	ada := cookieOf(t, postJSON("/api/login", map[string]string{"username": "ada", "password": "secret"}, nil))
+	bee := cookieOf(t, postJSON("/api/login", map[string]string{"username": "bee", "password": "secret"}, nil))
+	up := uploadFile(t, ada, "clip.mkv", "1")
+	if up.Code != http.StatusOK {
+		t.Fatalf("upload %d %s", up.Code, up.Body.String())
+	}
+	var upBody struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(up.Body.Bytes(), &upBody); err != nil {
+		t.Fatal(err)
+	}
+	got := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/download?path="+upBody.Path, nil)
+	req.AddCookie(ada)
+	handle(got, req)
+	if got.Code != http.StatusOK || got.Body.String() != "video-bytes" {
+		t.Fatalf("download %d %q", got.Code, got.Body.String())
+	}
+	if disp := got.Header().Get("Content-Disposition"); !strings.Contains(disp, "clip.mkv") {
+		t.Fatalf("disposition %q", disp)
+	}
+	denied := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/download?path="+upBody.Path, nil)
+	req.AddCookie(bee)
+	handle(denied, req)
+	if denied.Code == http.StatusOK {
+		t.Fatal("another user downloaded a private upload")
+	}
+	libraryFile := filepath.Join(root, "library.mkv")
+	if err := os.WriteFile(libraryFile, []byte("library"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	libDown := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/download?path=library.mkv", nil)
+	req.AddCookie(admin)
+	handle(libDown, req)
+	if libDown.Code != http.StatusBadRequest {
+		t.Fatalf("library download %d %s", libDown.Code, libDown.Body.String())
+	}
+	moved := postJSON("/api/video/transfer", map[string]string{"path": upBody.Path, "to": "bee"}, ada)
+	if moved.Code != http.StatusOK {
+		t.Fatalf("transfer %d %s", moved.Code, moved.Body.String())
+	}
+	var movedBody struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(moved.Body.Bytes(), &movedBody); err != nil {
+		t.Fatal(err)
+	}
+	if movedBody.Path == upBody.Path {
+		t.Fatalf("path did not change: %s", movedBody.Path)
+	}
+	beeUser, _ := findUser("bee")
+	full, err := safeVideo(movedBody.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasPathPrefix(full, filepath.Join(uploadRoot, beeUser.ID)) {
+		t.Fatalf("moved file %s is not bee's", full)
+	}
+	if _, err := os.Stat(full); err != nil {
+		t.Fatal(err)
+	}
+	old, err := safeVideo(upBody.Path)
+	if err == nil {
+		if _, statErr := os.Stat(old); !os.IsNotExist(statErr) {
+			t.Fatalf("old upload still present: %v", statErr)
+		}
+	}
+	beeDown := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/download?path="+movedBody.Path, nil)
+	req.AddCookie(bee)
+	handle(beeDown, req)
+	if beeDown.Code != http.StatusOK || beeDown.Body.String() != "video-bytes" {
+		t.Fatalf("new owner download %d %q", beeDown.Code, beeDown.Body.String())
+	}
+	del := httptest.NewRecorder()
+	dreq := httptest.NewRequest(http.MethodDelete, "/api/video?path=library.mkv", nil)
+	dreq.AddCookie(admin)
+	handle(del, dreq)
+	if del.Code != http.StatusOK {
+		t.Fatalf("delete %d %s", del.Code, del.Body.String())
+	}
+	audit, err := os.ReadFile(filepath.Join(configDir, "audit.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(audit, []byte("admin")) || !bytes.Contains(audit, []byte("library.mkv")) || !bytes.Contains(audit, []byte("delete")) {
+		t.Fatalf("audit %q", audit)
 	}
 }
 

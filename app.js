@@ -6,6 +6,10 @@ const SORT_STORE = "moovies.sort";
 const MINE_ONLY = "moovies.mineOnly";
 const THEME_KEY = "moovies.theme";
 const CONTINUE_COLLAPSE = "moovies.continueCollapsed";
+const WATCH_LATER = "gomoov.watchlater";
+const LATER_COLLAPSE = "gomoov.watchlaterCollapsed";
+const RECENT_COLLAPSE = "gomoov.recentCollapsed";
+const SEEN_LIBRARY = "gomoov.seenLibrary";
 const FOLDER_COLLAPSE = "moovies.folderCollapsed";
 const THEATER_KEY = "moovies.theater";
 const RATE_KEY = "moovies.rate";
@@ -29,9 +33,13 @@ const viewWatch = document.getElementById("view-watch");
 const libraryEl = document.getElementById("library");
 const continueSection = document.getElementById("continue-section");
 const continueRow = document.getElementById("continue-row");
+const laterSection = document.getElementById("later-section");
+const laterRow = document.getElementById("later-row");
+const recentSection = document.getElementById("recent-section");
+const recentRow = document.getElementById("recent-row");
 const searchInput = document.getElementById("search");
 const stage = document.getElementById("stage");
-const video = document.getElementById("video");
+let video = document.getElementById("video");
 const playBtn = document.getElementById("play");
 const bigPlay = document.getElementById("big-play");
 const skipBackBtn = document.getElementById("skip-back");
@@ -67,6 +75,11 @@ let mineOnly = false;
 let videoPlayer = false;
 let siteTheme = "dark";
 let continueCollapsed = false;
+let laterCollapsed = false;
+let recentCollapsed = false;
+let qualityGhost = null;
+const seenLibrary = Number(localStorage.getItem(SEEN_LIBRARY)) || 0;
+let visitNoted = false;
 let current = null;
 let streamStart = 0;
 let playToken = 0;
@@ -330,8 +343,42 @@ function cardHTML(item, mode) {
       "</div>" +
       (sub ? '<div class="card-meta">' + esc(sub) + "</div>" : "") +
       (mode === "continue" ? '<button type="button" class="continue-remove" data-continue-remove data-path="' + esc(item.path) + '">Remove from list</button>' : "") +
+      '<button type="button" class="continue-remove" data-watch-later data-path="' + esc(watchKey(item)) + '">' +
+        (mode === "watchlater" || inWatchLater(item) ? (mode === "watchlater" ? "Remove from Watch later" : "In Watch later") : "Watch later") +
+      "</button>" +
     "</article>"
   );
+}
+
+function watchLaterIDs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WATCH_LATER));
+    return Array.isArray(saved) ? saved.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function watchKey(item) {
+  return item.absPath || item.path;
+}
+
+function inWatchLater(item) {
+  return watchLaterIDs().includes(watchKey(item));
+}
+
+function toggleWatchLater(key) {
+  const had = watchLaterIDs().includes(key);
+  const list = watchLaterIDs().filter((item) => item !== key);
+  if (!had) list.push(key);
+  localStorage.setItem(WATCH_LATER, JSON.stringify(list));
+  renderHome();
+}
+
+function noteLibraryVisit() {
+  if (visitNoted) return;
+  visitNoted = true;
+  localStorage.setItem(SEEN_LIBRARY, String(Date.now() / 1000));
 }
 
 function nextHTML(item) {
@@ -498,10 +545,32 @@ function renderHome() {
       .sort((a, b) => (progress[progressKey(b)].at || 0) - (progress[progressKey(a)].at || 0))
     : [];
 
+  const later = [];
+  if (!q) {
+    const byKey = new Map(catalog.map((item) => [watchKey(item), item]));
+    for (const key of watchLaterIDs()) {
+      const item = byKey.get(key);
+      if (item) later.push(item);
+    }
+  }
+  const recent = !q && seenLibrary
+    ? catalog.filter((item) => (item.mtime || 0) > seenLibrary + 1).sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).slice(0, 24)
+    : [];
+
+  laterSection.hidden = later.length === 0;
+  laterSection.classList.toggle("collapsed", laterCollapsed);
+  document.getElementById("later-toggle").setAttribute("aria-expanded", laterCollapsed ? "false" : "true");
+  laterRow.innerHTML = later.map((item) => cardHTML(item, "watchlater")).join("");
+
   continueSection.hidden = continuing.length === 0;
   continueSection.classList.toggle("collapsed", continueCollapsed);
   document.getElementById("continue-toggle").setAttribute("aria-expanded", continueCollapsed ? "false" : "true");
   continueRow.innerHTML = continuing.map((item) => cardHTML(item, "continue")).join("");
+
+  recentSection.hidden = recent.length === 0;
+  recentSection.classList.toggle("collapsed", recentCollapsed);
+  document.getElementById("recent-toggle").setAttribute("aria-expanded", recentCollapsed ? "false" : "true");
+  recentRow.innerHTML = recent.map((item) => cardHTML(item, "plain")).join("");
 
   if (!items.length) {
     const empty = q ? "No videos match “" + esc(q) + "”." : (mineOnly && me ? "No videos of yours yet." : "No videos in this folder.");
@@ -618,8 +687,48 @@ function paintTimeline(ratio) {
   return played;
 }
 
-function setBuffering(on) {
+function needsEncode() {
+  if (!current) return false;
+  if (current.videoCodec && current.videoCodec !== "h264") return true;
+  if (qualityChoice && current.height && qualityChoice < current.height - 8) return true;
+  if (subChoice && !subChoice.text) return true;
+  return false;
+}
+
+function setBuffering(on, text) {
   stage.classList.toggle("buffering", on);
+  const label = document.getElementById("buffer-label");
+  if (!label) return;
+  if (!on) {
+    label.hidden = true;
+    return;
+  }
+  label.hidden = false;
+  label.textContent = text || (needsEncode() ? "Waiting for the encoder…" : "Waiting…");
+}
+
+function showKeyframeGap(asked, start) {
+  const note = document.getElementById("keyframe-note");
+  if (!note) return;
+  const gap = asked - start;
+  if (gap > 0.8) {
+    const rounded = Math.max(1, Math.round(gap));
+    note.hidden = false;
+    note.textContent = "This copy starts about " + rounded + " second" + (rounded === 1 ? "" : "s") + " early, at the previous keyframe.";
+  } else {
+    note.hidden = true;
+    note.textContent = "";
+  }
+}
+
+function dropQualityGhost() {
+  const ghost = qualityGhost;
+  qualityGhost = null;
+  if (!ghost) return;
+  ghost.pause();
+  ghost.removeAttribute("src");
+  ghost.load();
+  ghost.remove();
 }
 
 function showPlayerError(text) {
@@ -662,6 +771,7 @@ async function originFor(t) {
 
 async function restartAt(seconds, resume) {
   if (!current) return;
+  dropQualityGhost();
   const dur = totalDuration();
   const t = Math.max(0, Math.min(seconds, dur > 1 ? dur - 0.4 : seconds));
   const token = ++playToken;
@@ -673,6 +783,7 @@ async function restartAt(seconds, resume) {
   const start = await originFor(t);
   if (token !== playToken) return;
   streamStart = start;
+  showKeyframeGap(t, start);
   video.src = streamURL(current.path, t);
   video.addEventListener("loadeddata", () => {
     if (token !== playToken) return;
@@ -699,7 +810,7 @@ function seekTo(seconds, resume) {
   restartAt(seconds, resume);
 }
 
-function openVideo(item) {
+function openVideo(item, startAt) {
   flushProgress();
   current = item;
   viewHome.hidden = true;
@@ -722,7 +833,7 @@ function openVideo(item) {
   audioChoice = pickAudio(item);
   subChoice = pickSub(item);
   const saved = entryFor(item);
-  const start = saved && !saved.done && saved.t >= RESUME_AT ? saved.t : 0;
+  const start = startAt != null ? startAt : (saved && !saved.done && saved.t >= RESUME_AT ? saved.t : 0);
   startOverBtn.hidden = start < RESUME_AT;
   startOverBtn.textContent = start >= RESUME_AT
     ? "Start from beginning · resumed at " + formatTime(start)
@@ -737,7 +848,14 @@ function parseRoute() {
   const q = hash.indexOf("?");
   const pathname = q === -1 ? hash : hash.slice(0, q);
   const params = new URLSearchParams(q === -1 ? "" : hash.slice(q + 1));
-  return { pathname, video: params.get("v"), user: params.get("u") };
+  return { pathname, video: params.get("v"), user: params.get("u"), t: params.get("t") };
+}
+
+function routeTime(raw) {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
 }
 
 function route() {
@@ -745,7 +863,7 @@ function route() {
     showPasswordGate(true);
     return;
   }
-  const { pathname, video: path, user: userID } = parseRoute();
+  const { pathname, video: path, user: userID, t } = parseRoute();
   if (videoPlayer && (pathname === "/login" || pathname === "/users" || pathname === "/admin" || pathname === "/settings")) {
     location.hash = "/";
     return;
@@ -784,9 +902,13 @@ function route() {
       setStatus("That video is not in the library.");
       return;
     }
-    if (current && current.path === path && video.getAttribute("src")) return;
+    const startAt = routeTime(t);
+    if (current && current.path === path && video.getAttribute("src")) {
+      if (startAt != null) seekTo(startAt, true);
+      return;
+    }
     setStatus("");
-    openVideo(item);
+    openVideo(item, startAt);
     return;
   }
   showHome();
@@ -857,8 +979,31 @@ function showChrome() {
 }
 
 function hideChrome() {
-  if (scrubbing || stage.classList.contains("menu-open")) return;
+  if (scrubbing || stage.classList.contains("menu-open") || stage.classList.contains("keys-open")) return;
   stage.classList.remove("active");
+}
+
+function toggleKeys(force) {
+  const panel = document.getElementById("keys-panel");
+  const open = force == null ? panel.hidden : !!force;
+  panel.hidden = !open;
+  stage.classList.toggle("keys-open", open);
+  if (open) showChrome();
+}
+
+async function copyTimeLink() {
+  if (!current) return;
+  const t = Math.max(0, Math.floor(realTime()));
+  const url = location.origin + location.pathname + location.search + "#/watch?v=" + encodeURIComponent(current.path) + "&t=" + t;
+  try {
+    await navigator.clipboard.writeText(url);
+    setStatus("Link copied.");
+  } catch {
+    setStatus(url);
+  }
+  window.setTimeout(() => {
+    if (statusEl.textContent === "Link copied." || statusEl.textContent === url) setStatus("");
+  }, 2500);
 }
 
 function toggleTheater() {
@@ -966,12 +1111,64 @@ function applyPlaybackChange() {
   restartAt(at, resume);
 }
 
-function selectQuality(value) {
+async function selectQuality(value) {
   const next = Number(value) || 0;
   if (next === qualityChoice) return;
+  const at = current ? realTime() : 0;
+  const resume = !!(current && !video.paused);
   qualityChoice = next;
   savePrefs({ quality: next });
-  applyPlaybackChange();
+  if (!current || !video.getAttribute("src")) return;
+  dropQualityGhost();
+  const token = ++playToken;
+  setBuffering(true, "Switching to " + qualityText() + "…");
+  const start = await originFor(at);
+  if (token !== playToken || !current) return;
+  const ghost = document.createElement("video");
+  ghost.playsInline = true;
+  ghost.preload = "auto";
+  ghost.muted = true;
+  ghost.className = "quality-ghost";
+  qualityGhost = ghost;
+  video.insertAdjacentElement("afterend", ghost);
+  ghost.addEventListener("error", () => {
+    if (token !== playToken || qualityGhost !== ghost) return;
+    dropQualityGhost();
+    setBuffering(false);
+    setStatus("That quality could not be started.");
+  }, { once: true });
+  ghost.addEventListener("loadeddata", () => {
+    if (token !== playToken || !current || qualityGhost !== ghost) {
+      if (qualityGhost === ghost) dropQualityGhost();
+      return;
+    }
+    qualityGhost = null;
+    streamStart = start;
+    ghost.muted = video.muted;
+    ghost.volume = video.volume;
+    ghost.playbackRate = playbackRate;
+    const old = video;
+    ghost.id = "video";
+    ghost.classList.remove("quality-ghost");
+    old.removeAttribute("id");
+    old.replaceWith(ghost);
+    video = ghost;
+    attachVideo(video);
+    old.pause();
+    old.removeAttribute("src");
+    old.load();
+    ignoreMedia = false;
+    showKeyframeGap(at, start);
+    paintTimeline();
+    paintSubs();
+    if (resume) {
+      const pending = video.play();
+      if (pending) pending.catch(() => setBuffering(false));
+    } else {
+      setBuffering(false);
+    }
+  }, { once: true });
+  ghost.src = streamURL(current.path, at);
 }
 
 function selectAudio(id) {
@@ -1206,11 +1403,25 @@ document.getElementById("mine-only").addEventListener("change", (event) => {
   renderHome();
 });
 continueCollapsed = localStorage.getItem(CONTINUE_COLLAPSE) === "1";
+laterCollapsed = localStorage.getItem(LATER_COLLAPSE) === "1";
+recentCollapsed = localStorage.getItem(RECENT_COLLAPSE) === "1";
 document.getElementById("continue-toggle").addEventListener("click", () => {
   continueCollapsed = !continueCollapsed;
   localStorage.setItem(CONTINUE_COLLAPSE, continueCollapsed ? "1" : "0");
   continueSection.classList.toggle("collapsed", continueCollapsed);
   document.getElementById("continue-toggle").setAttribute("aria-expanded", continueCollapsed ? "false" : "true");
+});
+document.getElementById("later-toggle").addEventListener("click", () => {
+  laterCollapsed = !laterCollapsed;
+  localStorage.setItem(LATER_COLLAPSE, laterCollapsed ? "1" : "0");
+  laterSection.classList.toggle("collapsed", laterCollapsed);
+  document.getElementById("later-toggle").setAttribute("aria-expanded", laterCollapsed ? "false" : "true");
+});
+document.getElementById("recent-toggle").addEventListener("click", () => {
+  recentCollapsed = !recentCollapsed;
+  localStorage.setItem(RECENT_COLLAPSE, recentCollapsed ? "1" : "0");
+  recentSection.classList.toggle("collapsed", recentCollapsed);
+  document.getElementById("recent-toggle").setAttribute("aria-expanded", recentCollapsed ? "false" : "true");
 });
 
 let infoTarget = "";
@@ -1343,6 +1554,13 @@ document.body.addEventListener("click", (event) => {
     renderHome();
     return;
   }
+  const laterBtn = event.target.closest("[data-watch-later]");
+  if (laterBtn) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleWatchLater(laterBtn.dataset.path);
+    return;
+  }
   const info = event.target.closest("[data-info]");
   if (info) {
     event.preventDefault();
@@ -1397,6 +1615,14 @@ menuBtn.addEventListener("click", (event) => {
 });
 theaterBtn.addEventListener("click", toggleTheater);
 fullscreenBtn.addEventListener("click", toggleFullscreen);
+document.getElementById("copy-link").addEventListener("click", (event) => {
+  event.stopPropagation();
+  copyTimeLink();
+});
+document.getElementById("keys-btn").addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleKeys();
+});
 document.addEventListener("fullscreenchange", syncTransport);
 playerRetry.addEventListener("click", () => {
   if (current) restartAt(realTime() || streamStart, true);
@@ -1499,42 +1725,55 @@ stage.addEventListener("dblclick", (event) => {
   toggleFullscreen();
 });
 
-video.addEventListener("play", () => {
-  syncTransport();
-  if (isMobile()) hidePlayButton();
-  showChrome();
-});
-video.addEventListener("pause", () => {
-  syncTransport();
-  flushProgress();
-  if (isMobile()) showPlayButton();
-  showChrome();
-});
-video.addEventListener("playing", () => {
-  setBuffering(false);
-  syncTransport();
-});
-video.addEventListener("waiting", () => setBuffering(true));
-video.addEventListener("timeupdate", () => {
-  if (ignoreMedia || scrubbing) return;
-  paintTimeline();
-  paintSubs();
-  scheduleSave();
-});
-video.addEventListener("ended", () => {
-  if (ignoreMedia || !current) return;
-  sendProgress(current.path, { t: 0, dur: totalDuration(), at: Date.now(), done: true });
-  syncTransport();
-  setBuffering(false);
-});
-video.addEventListener("click", () => {
-  if (isMobile()) return;
-  window.clearTimeout(videoClickTimer);
-  videoClickTimer = window.setTimeout(() => {
-    videoClickTimer = 0;
-    togglePlay();
-  }, 220);
-});
+function attachVideo(el) {
+  if (el.dataset.mediaBound === "1") return;
+  el.dataset.mediaBound = "1";
+  el.addEventListener("play", () => {
+    syncTransport();
+    if (isMobile()) hidePlayButton();
+    showChrome();
+  });
+  el.addEventListener("pause", () => {
+    syncTransport();
+    flushProgress();
+    if (isMobile()) showPlayButton();
+    showChrome();
+  });
+  el.addEventListener("playing", () => {
+    setBuffering(false);
+    syncTransport();
+  });
+  el.addEventListener("waiting", () => setBuffering(true));
+  el.addEventListener("timeupdate", () => {
+    if (ignoreMedia || scrubbing || el !== video) return;
+    paintTimeline();
+    paintSubs();
+    scheduleSave();
+  });
+  el.addEventListener("ended", () => {
+    if (ignoreMedia || !current || el !== video) return;
+    sendProgress(current.path, { t: 0, dur: totalDuration(), at: Date.now(), done: true });
+    syncTransport();
+    setBuffering(false);
+  });
+  el.addEventListener("click", () => {
+    if (isMobile() || el !== video) return;
+    window.clearTimeout(videoClickTimer);
+    videoClickTimer = window.setTimeout(() => {
+      videoClickTimer = 0;
+      togglePlay();
+    }, 220);
+  });
+  el.addEventListener("error", () => {
+    if (el !== video || !video.getAttribute("src")) return;
+    const code = video.error && video.error.code;
+    if (code === 1) return;
+    ignoreMedia = false;
+    showPlayerError("This video could not be played. The file may still be unreadable, or playback was interrupted.");
+  });
+}
+
+attachVideo(video);
 
 const seekHint = document.getElementById("seek-hint");
 let seekHintTimer = 0;
@@ -1550,7 +1789,7 @@ function showSeekHint(direction) {
 
 stage.addEventListener("pointerup", (event) => {
   if (!isMobile()) return;
-  if (event.target.closest("button, input, .menu, .timeline")) return;
+  if (event.target.closest("button, input, .menu, .timeline, .keys-panel")) return;
   const now = performance.now();
   const rect = stage.getBoundingClientRect();
   const ratio = rect.width ? (event.clientX - rect.left) / rect.width : 0.5;
@@ -1579,14 +1818,6 @@ stage.addEventListener("pointerup", (event) => {
   }, 280);
 });
 
-video.addEventListener("error", () => {
-  if (!video.getAttribute("src")) return;
-  const code = video.error && video.error.code;
-  if (code === 1) return;
-  ignoreMedia = false;
-  showPlayerError("This video could not be played. The file may still be unreadable, or playback was interrupted.");
-});
-
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") flushProgress();
 });
@@ -1602,6 +1833,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (typing || viewWatch.hidden || !current) return;
+  if (event.key === "?") {
+    event.preventDefault();
+    toggleKeys();
+    return;
+  }
   if (event.key === " " || event.key === "k" || event.key === "K") {
     event.preventDefault();
     showChrome();
@@ -1640,6 +1876,10 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     seekTo(totalDuration() * (Number(event.key) / 10), !video.paused);
   } else if (event.key === "Escape") {
+    if (!document.getElementById("keys-panel").hidden) {
+      toggleKeys(false);
+      return;
+    }
     if (!document.getElementById("password-gate").hidden) {
       if (!(me && me.mustChangePassword)) closePasswordGate();
       return;
@@ -1780,6 +2020,7 @@ async function loadCatalog() {
   const data = await response.json();
   catalog = applyCatalog(data.videos || []);
   await loadServerProgress();
+  noteLibraryVisit();
   setStatus("");
 }
 
@@ -2387,10 +2628,17 @@ function renderSettingsVideos() {
     return;
   }
   host.innerHTML = mine.map((item) => (
-    '<article class="admin-video">' +
+    '<article class="mine-video">' +
       '<a href="#/watch?v=' + encodeURIComponent(item.path) + '" data-video="' + esc(item.path) + '">' + esc(item.fullTitle) + "</a>" +
       "<span>" + (item.private ? "Private" : "Public") + "</span>" +
-      '<button type="button" class="text-btn" data-settings-remove="' + esc(item.path) + '">Remove</button>' +
+      '<div class="video-actions">' +
+        '<a class="text-btn" href="/api/download?path=' + encodeURIComponent(item.path) + '">Download</a>' +
+        '<form class="hand-form" data-transfer="' + esc(item.path) + '">' +
+          '<input name="to" placeholder="Username" autocomplete="off" aria-label="Hand ' + esc(item.fullTitle) + ' to" required>' +
+          '<button type="submit" class="text-btn">Hand over</button>' +
+        "</form>" +
+        '<button type="button" class="text-btn" data-settings-remove="' + esc(item.path) + '">Remove</button>' +
+      "</div>" +
     "</article>"
   )).join("");
 }
@@ -2525,6 +2773,25 @@ document.getElementById("settings-video-list").addEventListener("click", async (
   if (!button) return;
   const response = await fetch("/api/video?path=" + encodeURIComponent(button.dataset.settingsRemove), { method: "DELETE" });
   if (!response.ok) return;
+  await loadCatalog();
+  renderSettingsVideos();
+});
+
+document.getElementById("settings-video-list").addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-transfer]");
+  if (!form) return;
+  event.preventDefault();
+  const to = form.to.value.trim();
+  const response = await fetch("/api/video/transfer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: form.dataset.transfer, to })
+  });
+  if (!response.ok) {
+    setStatus(await apiError(response));
+    return;
+  }
+  setStatus("Handed over to " + to + ".");
   await loadCatalog();
   renderSettingsVideos();
 });
