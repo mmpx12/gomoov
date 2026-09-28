@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.17"
+const version = "1.0.18"
 
 // probeVer invalidates cached probes when the stored shape changes.
 const probeVer = 2

@@ -820,22 +820,26 @@ h1 {
   margin-top: 0;
 }
 
+.card-menu { flex: 0 0 auto; }
+
 .info-btn {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border: 0;
-  border-radius: 50%;
-  background: #2a2a2a;
-  color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-  line-height: 1;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
 }
 
+.card-menu:hover,
+.card-menu:has(.info-btn[aria-expanded="true"]) { border-color: var(--accent); }
+
 .info-btn:hover,
-.info-btn[aria-expanded="true"] { background: #3a3a3a; }
+.info-btn[aria-expanded="true"] { color: var(--accent); }
 
 .card-title, .next-title {
   margin-top: 8px;

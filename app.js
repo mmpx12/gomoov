@@ -358,17 +358,30 @@ function cardHTML(item, mode) {
       "</div>" +
       '<div class="card-head">' +
         '<a class="card-title" href="' + href + '" data-video="' + esc(item.path) + '">' + esc(title) + "</a>" +
-        '<button type="button" class="info-btn" data-info data-path="' + esc(item.path) + '" aria-label="Info for ' + esc(title) + '">i</button>' +
+        '<div class="card-action card-menu">' +
+          '<button type="button" class="info-btn" data-info data-path="' + esc(item.path) + '" aria-label="Menu for ' + esc(title) + '">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
+          "</button>" +
+        "</div>" +
       "</div>" +
       (sub ? '<div class="card-meta">' + esc(sub) + "</div>" : "") +
-      '<div class="card-actions">' +
-        (mode === "continue" ? '<div class="card-action"><button type="button" class="continue-remove" data-continue-remove data-path="' + esc(item.path) + '">Remove from list</button></div>' : "") +
-        '<div class="card-action"><button type="button" class="continue-remove" data-watch-later data-path="' + esc(watchKey(item)) + '">' +
-          (mode === "watchlater" || inWatchLater(item) ? (mode === "watchlater" ? "Remove from Watch later" : "In Watch later") : "Watch later") +
-        "</button></div>" +
-      "</div>" +
+      cardActions(item, mode) +
     "</article>"
   );
+}
+
+function cardActions(item, mode) {
+  let button = "";
+  if (mode === "continue") {
+    button = '<div class="card-action"><button type="button" class="continue-remove" data-continue-remove data-path="' + esc(item.path) + '">Remove from list</button></div>';
+  } else if (mode === "watchlater") {
+    button = '<div class="card-action"><button type="button" class="continue-remove" data-watch-later data-path="' + esc(watchKey(item)) + '">Remove from Watch later</button></div>';
+  } else {
+    button = '<div class="card-action"><button type="button" class="continue-remove" data-watch-later data-path="' + esc(watchKey(item)) + '">' +
+      (inWatchLater(item) ? "In Watch later" : "Watch later") +
+    "</button></div>";
+  }
+  return '<div class="card-actions">' + button + "</div>";
 }
 
 function watchLaterIDs() {
