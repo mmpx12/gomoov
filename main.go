@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.3"
+const version = "1.0.4"
 
 var (
 	root  string
@@ -155,6 +155,11 @@ type videoInfo struct {
 	StreamTitle string  `json:"streamTitle"`
 	DisplayPath string  `json:"displayPath"`
 	AbsPath     string  `json:"absPath"`
+	OwnerID     string  `json:"ownerId,omitempty"`
+	OwnerName   string  `json:"ownerName,omitempty"`
+	Private     bool    `json:"private,omitempty"`
+	Mine        bool    `json:"mine,omitempty"`
+	CanRemove   bool    `json:"canRemove,omitempty"`
 }
 
 type track struct {
@@ -216,6 +221,9 @@ func main() {
 		log.Fatal(err)
 	}
 	if err := prepareFilters(includes, excludes); err != nil {
+		log.Fatal(err)
+	}
+	if err := initAuthPaths(); err != nil {
 		log.Fatal(err)
 	}
 	var movieRel string
@@ -421,15 +429,18 @@ func resolveMovie(raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !insideRoot(abs) {
-		return "", fmt.Errorf("%s is outside %s", raw, root)
-	}
 	st, err := os.Stat(abs)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", raw, err)
 	}
 	if st.IsDir() || !videoExt[strings.ToLower(filepath.Ext(abs))] {
 		return "", fmt.Errorf("%s is not a video", raw)
+	}
+	if isUnderUpload(abs) {
+		return relOf(abs), nil
+	}
+	if !insideRoot(abs) {
+		return "", fmt.Errorf("%s is outside %s", raw, root)
 	}
 	if !fileIncluded(abs) {
 		return "", fmt.Errorf("%s is excluded from the library", raw)
@@ -499,6 +510,82 @@ func launchBrowser(rawURL string) {
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
+	if u := currentUser(r); u != nil && u.MustChangePassword && !passwordChangeExempt(r) {
+		log.Printf("%s - %s %s blocked until password change", clientIP(r), r.Method, r.URL.RequestURI())
+		writeAPIError(w, http.StatusForbidden, "password_change_required")
+		return
+	}
+	switch r.URL.Path {
+	case "/api/login":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveLogin(w, r)
+		return
+	case "/api/logout":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveLogout(w, r)
+		return
+	case "/api/me":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveMe(w, r)
+		return
+	case "/api/password":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		servePassword(w, r)
+		return
+	case "/api/password-reset":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveResetRequest(w, r)
+		return
+	case "/api/users":
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		switch r.Method {
+		case http.MethodGet:
+			serveUserList(w, r)
+		case http.MethodPost:
+			serveUserCreate(w, r)
+		case http.MethodPut, http.MethodPatch:
+			serveUserUpdate(w, r)
+		default:
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+		}
+		return
+	case "/api/upload":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveUpload(w, r)
+		return
+	case "/api/video/visibility":
+		if r.Method != http.MethodPost && r.Method != http.MethodPut {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
+		serveVisibility(w, r)
+		return
+	}
 	if r.URL.Path == "/api/progress" && (r.Method == http.MethodGet || r.Method == http.MethodPut || r.Method == http.MethodPost) {
 		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
 		serveProgress(w, r)
@@ -518,14 +605,26 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	switch path {
 	case "/api/library":
-		writeJSON(w, map[string]any{"videos": getLibrary()})
+		writeJSON(w, map[string]any{"videos": presentLibrary(currentUser(r))})
 	case "/thumb":
+		if _, ok := visiblePath(w, r, q.Get("path")); !ok {
+			return
+		}
 		serveThumb(w, q.Get("path"))
 	case "/stream":
+		if _, ok := visiblePath(w, r, q.Get("path")); !ok {
+			return
+		}
 		serveStream(w, r, q)
 	case "/subs":
+		if _, ok := visiblePath(w, r, q.Get("path")); !ok {
+			return
+		}
 		serveSubs(w, q.Get("path"), q.Get("id"))
 	case "/start":
+		if _, ok := visiblePath(w, r, q.Get("path")); !ok {
+			return
+		}
 		serveStart(w, q)
 	case "/", "/index.html":
 		serveStatic(w, "index.html", "text/html; charset=utf-8")
@@ -538,10 +637,21 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func invalidateLibrary() {
+	libraryMu.Lock()
+	library = nil
+	libraryStamp = ""
+	libraryMu.Unlock()
+}
+
 func deleteVideo(w http.ResponseWriter, r *http.Request) {
 	path, err := safeVideo(r.URL.Query().Get("path"))
-	if err != nil {
+	if err != nil || !canSeePath(currentUser(r), path) {
 		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if !canRemove(currentUser(r), path) {
+		writeAPIError(w, http.StatusForbidden, "you cannot remove this video")
 		return
 	}
 	if err := os.Remove(path); err != nil {
@@ -549,11 +659,9 @@ func deleteVideo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not remove", http.StatusInternalServerError)
 		return
 	}
-	libraryMu.Lock()
-	library = nil
-	libraryStamp = ""
-	libraryMu.Unlock()
+	invalidateLibrary()
 	abs, _ := filepath.Abs(path)
+	forgetVideo(abs)
 	_ = writeProgressEntry(abs, nil)
 	log.Printf("%s removed %s", clientIP(r), relOf(path))
 	writeJSON(w, map[string]bool{"ok": true})
@@ -764,6 +872,9 @@ func safeVideo(raw string) (string, error) {
 	if rel == "" || strings.Contains(rel, "..") {
 		return "", errors.New("bad path")
 	}
+	if strings.HasPrefix(rel, "user/") {
+		return safeUploadPath(strings.TrimPrefix(rel, "user/"))
+	}
 	full := filepath.Join(root, filepath.FromSlash(rel))
 	full, err := filepath.Abs(full)
 	if err != nil {
@@ -780,15 +891,36 @@ func safeVideo(raw string) (string, error) {
 }
 
 func relOf(path string) string {
-	rel, err := filepath.Rel(root, path)
+	abs, err := filepath.Abs(path)
 	if err != nil {
-		return filepath.ToSlash(path)
+		abs = path
+	}
+	if owner, ok := uploadOwner(abs); ok {
+		up, err := filepath.Abs(uploadRoot)
+		if err == nil {
+			rel, err := filepath.Rel(up, abs)
+			if err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+				return "user/" + owner + "/" + filepath.ToSlash(strings.TrimPrefix(rel, owner+string(os.PathSeparator)))
+			}
+		}
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return filepath.ToSlash(abs)
 	}
 	return filepath.ToSlash(rel)
 }
 
 func listVideos() []string {
+	seen := map[string]bool{}
 	var found []string
+	add := func(abs string) {
+		if abs == "" || seen[abs] || isUnderUpload(abs) {
+			return
+		}
+		seen[abs] = true
+		found = append(found, abs)
+	}
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -802,6 +934,9 @@ func listVideos() []string {
 			if err != nil || !walkDir(abs) {
 				return filepath.SkipDir
 			}
+			if path != root && isUnderUpload(abs) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if strings.HasPrefix(name, ".") || !videoExt[strings.ToLower(filepath.Ext(name))] {
@@ -811,9 +946,16 @@ func listVideos() []string {
 		if err != nil || !insideRoot(abs) || !fileIncluded(abs) {
 			return nil
 		}
-		found = append(found, abs)
+		add(abs)
 		return nil
 	})
+	for _, abs := range listUploadVideos() {
+		if abs == "" || seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		found = append(found, abs)
+	}
 	sort.Strings(found)
 	return found
 }
@@ -1344,7 +1486,15 @@ func writeProgressEntry(abs string, entry *progressEntry) error {
 
 func serveProgress(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		writeJSON(w, readProgress())
+		user := currentUser(r)
+		all := readProgress()
+		visible := map[string]progressEntry{}
+		for abs, entry := range all {
+			if canSeePath(user, abs) {
+				visible[abs] = entry
+			}
+		}
+		writeJSON(w, visible)
 		return
 	}
 	var body struct {
@@ -1356,7 +1506,7 @@ func serveProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	full, err := safeVideo(body.Path)
-	if err != nil {
+	if err != nil || !canSeePath(currentUser(r), full) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

@@ -57,6 +57,7 @@ const playerMessageText = document.getElementById("player-message-text");
 const playerRetry = document.getElementById("player-retry");
 
 let catalog = [];
+let me = null;
 let sortKey = "name";
 let sortDesc = false;
 let groupByFolder = false;
@@ -312,6 +313,7 @@ function cardHTML(item, mode) {
           '<div class="thumb" style="--h:' + hue + ';background:linear-gradient(145deg,hsl(' + hue + ',55%,32%),hsl(' + ((hue + 36) % 360) + ',45%,14%))">' +
             '<div class="thumb-fallback">' + esc(initials(item.series || item.fullTitle).toUpperCase()) + "</div>" +
             '<img class="thumb-img" alt="" loading="lazy" draggable="false" src="' + esc(thumbURL(item)) + '">' +
+            (item.private ? '<span class="privacy-badge">Private</span>' : "") +
             '<span class="badge">' + esc(formatTime(item.duration)) + "</span>" +
             (ratio ? '<div class="thumb-progress"><span style="width:' + (ratio * 100).toFixed(1) + '%"></span></div>' : "") +
           "</div>" +
@@ -541,6 +543,7 @@ function upNextList(item) {
 function showHome() {
   flushProgress();
   closeMenu();
+  closeAccountMenu();
   subsToken += 1;
   subsCues = [];
   subsEl.innerHTML = "";
@@ -548,6 +551,8 @@ function showHome() {
   stopVideo();
   current = null;
   viewWatch.hidden = true;
+  viewLogin.hidden = true;
+  viewUsers.hidden = true;
   viewHome.hidden = false;
   document.title = "Moovies";
   renderHome();
@@ -679,7 +684,7 @@ function openVideo(item) {
   viewWatch.hidden = false;
   document.title = item.fullTitle + " · Moovies";
   watchTitle.textContent = item.fullTitle;
-  const bits = [formatTime(item.duration), item.quality, item.edition, item.sizeLabel].filter(Boolean);
+  const bits = [formatTime(item.duration), item.quality, item.edition, item.sizeLabel, item.private ? "Private" : ""].filter(Boolean);
   watchMeta.textContent = bits.join(" · ");
   if (item.videoCodec && item.videoCodec !== "h264") {
     codecHint.hidden = false;
@@ -714,7 +719,27 @@ function parseRoute() {
 }
 
 function route() {
+  if (me && me.mustChangePassword) {
+    showPasswordGate(true);
+    return;
+  }
   const { pathname, video: path } = parseRoute();
+  if (pathname === "/login") {
+    if (me) {
+      location.hash = "/";
+      return;
+    }
+    showLogin();
+    return;
+  }
+  if (pathname === "/users") {
+    if (!me || !me.admin) {
+      location.hash = "/";
+      return;
+    }
+    showUsers();
+    return;
+  }
   if (pathname === "/watch" && path) {
     const item = catalog.find((entry) => entry.path === path);
     if (!item) {
@@ -1164,6 +1189,15 @@ function openInfoFor(item, anchor) {
   document.getElementById("info-language").textContent = languages.join(", ") || "Unknown";
   document.getElementById("info-duration").textContent = formatTime(item.duration);
   document.getElementById("info-path").textContent = filePathLabel(item);
+  const visibility = item.ownerId
+    ? (item.private ? "Private" : "Public") + (item.ownerName ? " · " + item.ownerName : "")
+    : "Public";
+  document.getElementById("info-visibility").textContent = visibility;
+  const privacyBtn = document.getElementById("info-privacy");
+  const canPrivacy = !!(item.ownerId && me && (item.mine || me.admin));
+  privacyBtn.hidden = !canPrivacy;
+  privacyBtn.textContent = item.private ? "Make public" : "Make private";
+  document.getElementById("info-remove").hidden = !item.canRemove;
   document.querySelectorAll(".info-btn[aria-expanded='true']").forEach((btn) => btn.setAttribute("aria-expanded", "false"));
   if (anchor && anchor.classList && anchor.classList.contains("info-btn")) anchor.setAttribute("aria-expanded", "true");
   const menu = document.getElementById("info-menu");
@@ -1562,6 +1596,18 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     seekTo(totalDuration() * (Number(event.key) / 10), !video.paused);
   } else if (event.key === "Escape") {
+    if (!document.getElementById("password-gate").hidden) {
+      if (!(me && me.mustChangePassword)) closePasswordGate();
+      return;
+    }
+    if (!document.getElementById("upload-modal").hidden) {
+      closeUpload();
+      return;
+    }
+    if (!document.getElementById("account-menu").hidden) {
+      closeAccountMenu();
+      return;
+    }
     if (!document.getElementById("refresh-wait").hidden) {
       stopRefresh();
       return;
@@ -1631,19 +1677,422 @@ if (storedVolume !== null && !Number.isNaN(Number(storedVolume))) {
   volumeInput.value = storedVolume;
 }
 
+const viewLogin = document.getElementById("view-login");
+const viewUsers = document.getElementById("view-users");
+
+function closeAccountMenu() {
+  document.getElementById("account-menu").hidden = true;
+  document.getElementById("account-btn").setAttribute("aria-expanded", "false");
+}
+
+function renderAccount() {
+  const button = document.getElementById("account-btn");
+  const upload = document.getElementById("account-upload");
+  const users = document.getElementById("account-users");
+  const password = document.getElementById("account-password");
+  const logout = document.getElementById("account-logout");
+  if (!me) {
+    button.textContent = "Sign in";
+    upload.hidden = true;
+    users.hidden = true;
+    password.hidden = true;
+    logout.hidden = true;
+    return;
+  }
+  button.textContent = me.username;
+  upload.hidden = !me.canUpload;
+  users.hidden = !me.admin;
+  users.textContent = me.admin && me.resetCount ? "Users (" + me.resetCount + ")" : "Users";
+  password.hidden = false;
+  logout.hidden = false;
+}
+
+async function loadMe() {
+  const response = await fetch("/api/me");
+  if (!response.ok) {
+    me = null;
+    renderAccount();
+    return;
+  }
+  const data = await response.json();
+  me = data.user || null;
+  renderAccount();
+}
+
+async function loadCatalog() {
+  setStatus("Loading library…");
+  const response = await fetch("/api/library");
+  if (!response.ok) throw new Error("bad status");
+  const data = await response.json();
+  catalog = applyCatalog(data.videos || []);
+  await loadServerProgress();
+  setStatus("");
+}
+
+function showLogin() {
+  closeAccountMenu();
+  closeMenu();
+  viewHome.hidden = true;
+  viewWatch.hidden = true;
+  viewUsers.hidden = true;
+  viewLogin.hidden = false;
+  document.title = "Sign in · Moovies";
+}
+
+async function showUsers() {
+  closeAccountMenu();
+  closeMenu();
+  viewHome.hidden = true;
+  viewWatch.hidden = true;
+  viewLogin.hidden = true;
+  viewUsers.hidden = false;
+  document.title = "Users · Moovies";
+  await renderUserList();
+}
+
+function showPasswordGate(forced) {
+  const gate = document.getElementById("password-gate");
+  document.getElementById("password-note").hidden = !forced;
+  document.getElementById("password-cancel").hidden = !!forced;
+  document.getElementById("password-title").textContent = forced ? "Choose a new password" : "Change password";
+  document.getElementById("password-error").hidden = true;
+  gate.hidden = false;
+}
+
+function closePasswordGate() {
+  document.getElementById("password-gate").hidden = true;
+  document.getElementById("password-form").reset();
+}
+
+function closeUpload() {
+  document.getElementById("upload-modal").hidden = true;
+  document.getElementById("upload-error").hidden = true;
+}
+
+async function apiError(response) {
+  try {
+    const data = await response.json();
+    if (data.error === "password_change_required") {
+      if (me) me.mustChangePassword = true;
+      showPasswordGate(true);
+      return "Choose a new password before continuing.";
+    }
+    return data.error || "Request failed.";
+  } catch {
+    return "Request failed.";
+  }
+}
+
+document.getElementById("account-btn").addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (!me) {
+    location.hash = "/login";
+    route();
+    return;
+  }
+  const menu = document.getElementById("account-menu");
+  if (!menu.hidden) {
+    closeAccountMenu();
+    return;
+  }
+  menu.hidden = false;
+  document.getElementById("account-btn").setAttribute("aria-expanded", "true");
+  const rect = document.getElementById("account-btn").getBoundingClientRect();
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  const width = menu.offsetWidth;
+  menu.style.left = Math.max(8, rect.right - width) + "px";
+  menu.style.top = (rect.bottom + 6) + "px";
+});
+
+document.getElementById("account-upload").addEventListener("click", () => {
+  closeAccountMenu();
+  document.getElementById("upload-form").reset();
+  document.getElementById("upload-error").hidden = true;
+  document.getElementById("upload-modal").hidden = false;
+});
+
+document.getElementById("account-users").addEventListener("click", () => {
+  closeAccountMenu();
+  location.hash = "/users";
+  route();
+});
+
+document.getElementById("account-password").addEventListener("click", () => {
+  closeAccountMenu();
+  showPasswordGate(false);
+});
+
+document.getElementById("account-logout").addEventListener("click", async () => {
+  closeAccountMenu();
+  await fetch("/api/logout", { method: "POST" });
+  me = null;
+  renderAccount();
+  try {
+    await loadCatalog();
+  } catch {
+    catalog = [];
+  }
+  location.hash = "/";
+  showHome();
+});
+
+document.getElementById("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("login-error");
+  error.hidden = true;
+  const response = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: document.getElementById("login-user").value,
+      password: document.getElementById("login-pass").value
+    })
+  });
+  if (!response.ok) {
+    error.textContent = await apiError(response);
+    error.hidden = false;
+    return;
+  }
+  const data = await response.json();
+  me = data.user || null;
+  renderAccount();
+  document.getElementById("login-form").reset();
+  if (me && me.mustChangePassword) {
+    showPasswordGate(true);
+    return;
+  }
+  try {
+    await loadCatalog();
+  } catch {
+    setStatus("Could not load the library.");
+  }
+  location.hash = "/";
+  showHome();
+});
+
+document.getElementById("forgot-btn").addEventListener("click", async () => {
+  const username = document.getElementById("login-user").value.trim();
+  const note = document.getElementById("forgot-note");
+  if (!username) {
+    note.textContent = "Type your username first, then ask for a reset.";
+    note.hidden = false;
+    return;
+  }
+  const response = await fetch("/api/password-reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username })
+  });
+  const data = await response.json().catch(() => ({}));
+  note.textContent = data.message || "If that account exists, the admin was notified.";
+  note.hidden = false;
+});
+
+document.getElementById("password-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("password-error");
+  error.hidden = true;
+  const next = document.getElementById("password-new").value;
+  if (next !== document.getElementById("password-confirm").value) {
+    error.textContent = "The new passwords do not match.";
+    error.hidden = false;
+    return;
+  }
+  const response = await fetch("/api/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      current: document.getElementById("password-current").value,
+      next
+    })
+  });
+  if (!response.ok) {
+    error.textContent = await apiError(response);
+    error.hidden = false;
+    return;
+  }
+  const data = await response.json();
+  me = data.user || me;
+  if (me) me.mustChangePassword = false;
+  renderAccount();
+  closePasswordGate();
+  try {
+    await loadCatalog();
+  } catch {
+    setStatus("Could not load the library.");
+  }
+  if (viewLogin && !viewLogin.hidden) viewLogin.hidden = true;
+  if ((location.hash.replace(/^#/, "") || "/") === "/login") location.hash = "/";
+  route();
+});
+
+document.getElementById("password-cancel").addEventListener("click", closePasswordGate);
+document.getElementById("password-gate").addEventListener("click", (event) => {
+  if (event.target.id === "password-gate" && !(me && me.mustChangePassword)) closePasswordGate();
+});
+document.getElementById("upload-cancel").addEventListener("click", closeUpload);
+document.getElementById("upload-modal").addEventListener("click", (event) => {
+  if (event.target.id === "upload-modal") closeUpload();
+});
+
+document.getElementById("upload-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("upload-error");
+  const submit = document.getElementById("upload-submit");
+  error.hidden = true;
+  const file = document.getElementById("upload-file").files[0];
+  if (!file) return;
+  const body = new FormData();
+  body.append("file", file);
+  body.append("private", document.getElementById("upload-private").checked ? "1" : "0");
+  submit.disabled = true;
+  submit.textContent = "Uploading…";
+  try {
+    const response = await fetch("/api/upload", { method: "POST", body });
+    if (!response.ok) {
+      error.textContent = await apiError(response);
+      error.hidden = false;
+      return;
+    }
+    closeUpload();
+    await loadCatalog();
+    if (!viewHome.hidden) renderHome();
+  } catch {
+    error.textContent = "Could not upload the video.";
+    error.hidden = false;
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Upload";
+  }
+});
+
+document.getElementById("info-privacy").addEventListener("click", async () => {
+  const item = catalog.find((entry) => entry.path === infoTarget) || current;
+  if (!item) return;
+  const response = await fetch("/api/video/visibility", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: item.path, private: !item.private })
+  });
+  if (!response.ok) return;
+  closeInfoMenu();
+  await loadCatalog();
+  const updated = catalog.find((entry) => entry.path === item.path);
+  if (updated && current && current.path === item.path) {
+    current.private = updated.private;
+    current.ownerName = updated.ownerName;
+    const bits = [formatTime(current.duration), current.quality, current.edition, current.sizeLabel, current.private ? "Private" : ""].filter(Boolean);
+    watchMeta.textContent = bits.join(" · ");
+  }
+  if (!viewHome.hidden) renderHome();
+});
+
+document.getElementById("user-add").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("user-add-error");
+  error.hidden = true;
+  const response = await fetch("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: document.getElementById("new-username").value.trim(),
+      password: document.getElementById("new-password").value,
+      canUpload: document.getElementById("new-upload").checked,
+      mustChangePassword: document.getElementById("new-force").checked
+    })
+  });
+  if (!response.ok) {
+    error.textContent = await apiError(response);
+    error.hidden = false;
+    return;
+  }
+  document.getElementById("user-add").reset();
+  document.getElementById("new-force").checked = true;
+  await loadMe();
+  await renderUserList();
+});
+
+async function renderUserList() {
+  const host = document.getElementById("user-list");
+  const response = await fetch("/api/users");
+  if (!response.ok) {
+    host.innerHTML = '<p class="empty">Users are visible to the admin only.</p>';
+    return;
+  }
+  const data = await response.json();
+  host.innerHTML = (data.users || []).map((user) => (
+    '<article class="user-row" data-user="' + esc(user.id) + '">' +
+      "<header><strong>" + esc(user.username) + "</strong>" +
+        (user.admin ? '<span class="pill">Admin</span>' : "") +
+        (user.resetRequested ? '<span class="pill warn">Password reset requested</span>' : "") +
+        (user.mustChangePassword ? '<span class="pill">Must change password</span>' : "") +
+      "</header>" +
+      '<label class="check"><input type="checkbox" data-upload ' + (user.canUpload ? "checked" : "") + (user.admin ? " disabled" : "") + "> Can upload videos</label>" +
+      '<form class="user-pass" data-pass-form>' +
+        '<input type="password" name="password" placeholder="New password" autocomplete="new-password" required>' +
+        '<label class="check"><input type="checkbox" name="force" ' + (user.resetRequested ? "checked" : "") + "> Force change after login</label>" +
+        '<button type="submit">Set password</button>' +
+      "</form>" +
+      '<p class="modal-error" data-user-error hidden></p>' +
+    "</article>"
+  )).join("") || '<p class="empty">No users yet.</p>';
+}
+
+document.getElementById("user-list").addEventListener("change", async (event) => {
+  const box = event.target.closest("[data-upload]");
+  if (!box) return;
+  const row = box.closest("[data-user]");
+  const response = await fetch("/api/users", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: row.dataset.user, canUpload: box.checked })
+  });
+  if (!response.ok) box.checked = !box.checked;
+});
+
+document.getElementById("user-list").addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-pass-form]");
+  if (!form) return;
+  event.preventDefault();
+  const row = form.closest("[data-user]");
+  const error = row.querySelector("[data-user-error]");
+  error.hidden = true;
+  const response = await fetch("/api/users", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: row.dataset.user,
+      password: form.password.value,
+      mustChangePassword: form.force.checked
+    })
+  });
+  if (!response.ok) {
+    error.textContent = await apiError(response);
+    error.hidden = false;
+    return;
+  }
+  form.reset();
+  await loadMe();
+  await renderUserList();
+});
+
+document.body.addEventListener("click", (event) => {
+  if (!event.target.closest("#account-menu") && !event.target.closest("#account-btn")) closeAccountMenu();
+});
+
 async function init() {
   if (location.protocol === "file:") {
     setStatus("Open this page through the player. In the video folder, run ./gomoov and open the address it prints.");
     return;
   }
-  setStatus("Loading library…");
   try {
-    const response = await fetch("/api/library");
-    if (!response.ok) throw new Error("bad status");
-    const data = await response.json();
-    catalog = applyCatalog(data.videos || []);
-    await loadServerProgress();
-    setStatus("");
+    await loadMe();
+    if (me && me.mustChangePassword) {
+      showPasswordGate(true);
+      return;
+    }
+    await loadCatalog();
     route();
   } catch {
     setStatus("Could not load the library. In the video folder, run ./gomoov and open the address it prints.");
