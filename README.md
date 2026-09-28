@@ -113,6 +113,7 @@ The site theme chosen here is the default for people who have not picked their o
 | `~/.gomoov/sessions.json` | Sign-in sessions |
 | `~/.gomoov/visibility.json` | Which uploads are private |
 | `~/.gomoov/progress.json` | Continue watching |
+| `~/.gomoov/settings.json` | Site theme, basic auth, and IP rules |
 | `/tmp/moovies-cache` | Probe, thumbnail, and subtitle cache. Override with `MOOVIES_CACHE` |
 
 ## systemd
