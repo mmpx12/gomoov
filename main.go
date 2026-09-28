@@ -37,7 +37,7 @@ var web embed.FS
 var brandLogos embed.FS
 
 // version is increased on every change.
-const version = "1.0.24"
+const version = "1.0.25"
 
 // probeVer invalidates cached probes when the stored shape changes.
 const probeVer = 2
@@ -945,14 +945,7 @@ func serveStream(w http.ResponseWriter, r *http.Request, q url.Values) {
 
 	args := streamArgs(path, start, quality, audio, burn)
 	cmd := exec.CommandContext(r.Context(), args[0], args[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = 2 * time.Second
+	setProcGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		http.Error(w, "stream", http.StatusInternalServerError)
