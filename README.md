@@ -204,7 +204,7 @@ Stop a gomoov you started by hand before enabling either service. Both want port
 go test ./...
 ```
 
-A tag named `v1.*` builds a matrix of Linux and macOS binaries and attaches them to that GitHub release. Linux is published twice: `gomoov-linux-<arch>` uses `ffmpeg` and `ffprobe` on `PATH`, and `gomoov-linux-<arch>-ffmpeg` includes them. macOS builds are the PATH variant only.
+A tag named `v1.*` builds a matrix of Linux, Windows, and macOS binaries and attaches them to that GitHub release. Linux and Windows are published twice: `gomoov-<os>-<arch>` uses `ffmpeg` and `ffprobe` on `PATH`, and `gomoov-<os>-<arch>-ffmpeg` includes them. macOS builds are the PATH variant only.
 
 The version in `main.go` increases on each change. Movies, torrents, and the built `gomoov` binary are not part of the git history.
 
