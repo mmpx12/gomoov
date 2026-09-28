@@ -1,0 +1,25 @@
+services:
+  gomoov:
+    build:
+      context: .
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: gomoov
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      HOME: /var/lib/gomoov
+      LIBRARY: /videos
+      HOST: 0.0.0.0
+      PORT: "8080"
+      # Set USER_MODE=0 for the simple player. 1 is accounts and uploads.
+      USER_MODE: ${USER_MODE:-1}
+      SHOW_PRIVATE: ${SHOW_PRIVATE:-0}
+    volumes:
+      - ${LIBRARY_DIR:-./videos}:/videos
+      - gomoov-home:/var/lib/gomoov
+    restart: unless-stopped
+
+volumes:
+  gomoov-home:

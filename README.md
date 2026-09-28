@@ -138,6 +138,30 @@ The site theme chosen here is the default for people who have not picked their o
 | `~/.gomoov/audit.log` | Who deleted a video, and when |
 | `~/.gomoov/cache` | Probe, thumbnail, and subtitle cache. Override with `MOOVIES_CACHE` |
 
+## Docker
+
+The image listens on port 8080, reads movies from `/videos`, and keeps accounts, uploads, and the cache under `/var/lib/gomoov`. It uses Debian's `ffmpeg`. User mode is on unless `USER_MODE=0`.
+
+```bash
+mkdir -p ~/videos
+LIBRARY_DIR=~/videos docker compose up --build -d
+```
+
+`LIBRARY_DIR` is the movie folder on the host. It is mounted at `/videos`. `PORT` changes the published port. Build args `UID` and `GID` (both default to 1000) are the user inside the container, so that user must be able to read the movie folder.
+
+```bash
+UID="$(id -u)" GID="$(id -g)" LIBRARY_DIR=~/videos docker compose up --build -d
+```
+
+Accounts and uploaded videos stay in the `gomoov-home` volume (`~/gomoov` and `~/.gomoov` inside the container). Open `http://127.0.0.1:8080`.
+
+A machine with VAAPI can pass the render device through. Add this under the `gomoov` service:
+
+```yaml
+devices:
+  - /dev/dri:/dev/dri
+```
+
 ## systemd
 
 Both targets install the binary and a service that runs `gomoov -U -L <library> -H <host> -p <port>`. `LIBRARY` is that folder and defaults to the directory you run `make` from. `HOST` defaults to `0.0.0.0` and `PORT` to `8080`. `SHOW_PRIVATE=1` adds `--show-private`.

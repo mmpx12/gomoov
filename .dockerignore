@@ -1,0 +1,7 @@
+*
+!go.mod
+!*.go
+!index.html
+!app.js
+!styles.css
+!docker-entrypoint.sh
