@@ -51,6 +51,7 @@ type userRecord struct {
 	CanUpload          bool   `json:"canUpload"`
 	MustChangePassword bool   `json:"mustChangePassword"`
 	ResetRequested     bool   `json:"resetRequested"`
+	Banned             bool   `json:"banned"`
 }
 
 type sessionRecord struct {
@@ -321,7 +322,9 @@ func currentUser(r *http.Request) *userRecord {
 		return nil
 	}
 	u, ok := userByIDLocked(sess.UserID)
-	if !ok {
+	if !ok || u.Banned {
+		delete(sessions, cookie.Value)
+		_ = saveSessionsLocked()
 		return nil
 	}
 	cp := u
@@ -381,6 +384,7 @@ func publicUser(u userRecord, adminView bool) map[string]any {
 	}
 	if adminView {
 		out["resetRequested"] = u.ResetRequested
+		out["banned"] = u.Banned
 	}
 	return out
 }
@@ -444,6 +448,10 @@ func serveLogin(w http.ResponseWriter, r *http.Request) {
 	u, ok := findUser(body.Username)
 	if !ok || !verifyPassword(body.Password, u.PassSalt, u.PassHash, u.PassIter) {
 		writeAPIError(w, http.StatusUnauthorized, "Wrong username or password.")
+		return
+	}
+	if u.Banned {
+		writeAPIError(w, http.StatusForbidden, "This account is banned.")
 		return
 	}
 	if err := startSession(w, u.ID); err != nil {
@@ -623,6 +631,7 @@ func serveUserUpdate(w http.ResponseWriter, r *http.Request) {
 		Password           *string `json:"password"`
 		CanUpload          *bool   `json:"canUpload"`
 		MustChangePassword *bool   `json:"mustChangePassword"`
+		Banned             *bool   `json:"banned"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -663,15 +672,125 @@ func serveUserUpdate(w http.ResponseWriter, r *http.Request) {
 		if body.MustChangePassword != nil {
 			users[i].MustChangePassword = *body.MustChangePassword
 		}
+		if body.Banned != nil {
+			if users[i].Admin {
+				writeAPIError(w, http.StatusBadRequest, "The admin account cannot be banned.")
+				return
+			}
+			users[i].Banned = *body.Banned
+			if users[i].Banned {
+				dropSessionsLocked(users[i].ID)
+			}
+		}
 		if err := saveUsersLocked(); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "could not save user")
 			return
 		}
-		log.Printf("%s updated user %s", clientIP(r), users[i].Username)
+		if users[i].Banned {
+			_ = saveSessionsLocked()
+		}
+		log.Printf("%s updated user %s banned=%v", clientIP(r), users[i].Username, users[i].Banned)
 		writeJSON(w, map[string]any{"user": publicUser(users[i], true)})
 		return
 	}
 	writeAPIError(w, http.StatusNotFound, "user not found")
+}
+
+func serveUserDetail(w http.ResponseWriter, r *http.Request, id string) {
+	if requireAdmin(w, r) == nil {
+		return
+	}
+	u, ok := userByID(id)
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	writeJSON(w, map[string]any{
+		"user":   publicUser(u, true),
+		"videos": videosOf(u.ID),
+	})
+}
+
+func videosOf(owner string) []videoInfo {
+	all := presentLibrary(&userRecord{Admin: true})
+	out := make([]videoInfo, 0)
+	for _, v := range all {
+		if v.OwnerID == owner {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func serveUserDelete(w http.ResponseWriter, r *http.Request) {
+	admin := requireAdmin(w, r)
+	if admin == nil {
+		return
+	}
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	u, ok := userByID(id)
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if u.Admin || u.ID == admin.ID {
+		writeAPIError(w, http.StatusBadRequest, "The admin account cannot be deleted.")
+		return
+	}
+	authMu.Lock()
+	kept := users[:0]
+	for _, item := range users {
+		if item.ID != u.ID {
+			kept = append(kept, item)
+		}
+	}
+	users = kept
+	dropSessionsLocked(u.ID)
+	err := saveUsersLocked()
+	if err == nil {
+		err = saveSessionsLocked()
+	}
+	authMu.Unlock()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "could not delete user")
+		return
+	}
+	removeUserFiles(u.ID)
+	invalidateLibrary()
+	log.Printf("%s deleted user %s", clientIP(r), u.Username)
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func dropSessionsLocked(userID string) {
+	for token, sess := range sessions {
+		if sess.UserID == userID {
+			delete(sessions, token)
+		}
+	}
+}
+
+func removeUserFiles(id string) {
+	if !validUserID(id) || uploadRoot == "" {
+		return
+	}
+	dir, err := filepath.Abs(filepath.Join(uploadRoot, id))
+	if err != nil {
+		return
+	}
+	up, err := filepath.Abs(uploadRoot)
+	if err != nil || !hasPathPrefix(dir, up) || dir == up {
+		return
+	}
+	_ = os.RemoveAll(dir)
+	authMu.Lock()
+	for path := range visibility {
+		if hasPathPrefix(path, dir) {
+			delete(visibility, path)
+		}
+	}
+	_ = saveVisibilityLocked()
+	authMu.Unlock()
+	forgetProgressUnder(dir)
 }
 
 func serveUpload(w http.ResponseWriter, r *http.Request) {
@@ -919,10 +1038,7 @@ func canSeePath(user *userRecord, abs string) bool {
 	if isUnderUpload(abs) {
 		return canSeeMeta(user, metaFor(abs))
 	}
-	if !insideRoot(abs) || !fileIncluded(abs) {
-		return false
-	}
-	return true
+	return libraryFile(abs)
 }
 
 func canRemove(user *userRecord, abs string) bool {

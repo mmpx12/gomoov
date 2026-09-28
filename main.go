@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.4"
+const version = "1.0.7"
 
 var (
 	root  string
@@ -122,7 +122,8 @@ Usage:
   gomoov [flags]
 
 Run it in the folder that holds the videos. Paths may be absolute or relative
-to that folder. A leading ~/ is your home directory.
+to that folder. A leading ~/ is your home directory. -i may point at a folder
+outside the one you started in. Uploads in ~/gomoov stay available either way.
 
 Flags:
   -h, --help                 show this help and exit
@@ -340,9 +341,6 @@ func resolveDir(raw string) (string, error) {
 	if !st.IsDir() {
 		return "", fmt.Errorf("%s is not a directory", raw)
 	}
-	if !insideRoot(abs) {
-		return "", fmt.Errorf("%s is outside %s", raw, root)
-	}
 	return abs, nil
 }
 
@@ -436,16 +434,47 @@ func resolveMovie(raw string) (string, error) {
 	if st.IsDir() || !videoExt[strings.ToLower(filepath.Ext(abs))] {
 		return "", fmt.Errorf("%s is not a video", raw)
 	}
-	if isUnderUpload(abs) {
-		return relOf(abs), nil
-	}
-	if !insideRoot(abs) {
-		return "", fmt.Errorf("%s is outside %s", raw, root)
-	}
-	if !fileIncluded(abs) {
-		return "", fmt.Errorf("%s is excluded from the library", raw)
+	if !libraryFile(abs) {
+		return "", fmt.Errorf("%s is outside the library", raw)
 	}
 	return relOf(abs), nil
+}
+
+func includeKey(dir string) string {
+	sum := sha1.Sum([]byte(filepath.Clean(dir)))
+	return fmt.Sprintf("%x", sum[:6])
+}
+
+func externalRel(abs string) (string, bool) {
+	for _, dir := range includeDirs {
+		if dir == root || insideRoot(dir) || !hasPathPrefix(abs, dir) {
+			continue
+		}
+		rel, err := filepath.Rel(dir, abs)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		return "inc/" + includeKey(dir) + "/" + filepath.ToSlash(rel), true
+	}
+	return "", false
+}
+
+func libraryFile(abs string) bool {
+	if isUnderUpload(abs) {
+		return true
+	}
+	if !fileIncluded(abs) {
+		return false
+	}
+	if insideRoot(abs) {
+		return true
+	}
+	for _, dir := range includeDirs {
+		if hasPathPrefix(abs, dir) {
+			return true
+		}
+	}
+	return false
 }
 
 func openMovie(host, port, rel string) {
@@ -560,11 +589,17 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s - %s %s", clientIP(r), r.Method, r.URL.RequestURI())
 		switch r.Method {
 		case http.MethodGet:
-			serveUserList(w, r)
+			if id := strings.TrimSpace(r.URL.Query().Get("id")); id != "" {
+				serveUserDetail(w, r, id)
+			} else {
+				serveUserList(w, r)
+			}
 		case http.MethodPost:
 			serveUserCreate(w, r)
 		case http.MethodPut, http.MethodPatch:
 			serveUserUpdate(w, r)
+		case http.MethodDelete:
+			serveUserDelete(w, r)
 		default:
 			http.Error(w, "method", http.StatusMethodNotAllowed)
 		}
@@ -875,6 +910,9 @@ func safeVideo(raw string) (string, error) {
 	if strings.HasPrefix(rel, "user/") {
 		return safeUploadPath(strings.TrimPrefix(rel, "user/"))
 	}
+	if strings.HasPrefix(rel, "inc/") {
+		return safeExternalPath(strings.TrimPrefix(rel, "inc/"))
+	}
 	full := filepath.Join(root, filepath.FromSlash(rel))
 	full, err := filepath.Abs(full)
 	if err != nil {
@@ -903,6 +941,9 @@ func relOf(path string) string {
 				return "user/" + owner + "/" + filepath.ToSlash(strings.TrimPrefix(rel, owner+string(os.PathSeparator)))
 			}
 		}
+	}
+	if rel, ok := externalRel(abs); ok {
+		return rel
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil {
@@ -949,6 +990,13 @@ func listVideos() []string {
 		add(abs)
 		return nil
 	})
+	for _, abs := range listOutsideIncludes() {
+		if abs == "" || seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		found = append(found, abs)
+	}
 	for _, abs := range listUploadVideos() {
 		if abs == "" || seen[abs] {
 			continue
@@ -958,6 +1006,73 @@ func listVideos() []string {
 	}
 	sort.Strings(found)
 	return found
+}
+
+func listOutsideIncludes() []string {
+	var found []string
+	for _, dir := range includeDirs {
+		if dir == root || insideRoot(dir) {
+			continue
+		}
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			name := d.Name()
+			if d.IsDir() {
+				if path != dir && strings.HasPrefix(name, ".") {
+					return filepath.SkipDir
+				}
+				abs, err := filepath.Abs(path)
+				if err != nil || !walkDir(abs) {
+					return filepath.SkipDir
+				}
+				if path != dir && isUnderUpload(abs) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.HasPrefix(name, ".") || !videoExt[strings.ToLower(filepath.Ext(name))] {
+				return nil
+			}
+			abs, err := filepath.Abs(path)
+			if err != nil || !libraryFile(abs) || isUnderUpload(abs) {
+				return nil
+			}
+			found = append(found, abs)
+			return nil
+		})
+	}
+	return found
+}
+
+func safeExternalPath(rest string) (string, error) {
+	if rest == "" || strings.Contains(rest, "..") {
+		return "", errors.New("bad path")
+	}
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", errors.New("bad path")
+	}
+	var dir string
+	for _, inc := range includeDirs {
+		if includeKey(inc) == parts[0] {
+			dir = inc
+			break
+		}
+	}
+	if dir == "" {
+		return "", errors.New("bad path")
+	}
+	full, err := filepath.Abs(filepath.Join(dir, filepath.FromSlash(parts[1])))
+	if err != nil || !hasPathPrefix(full, dir) || !libraryFile(full) {
+		return "", errors.New("bad path")
+	}
+	st, err := os.Stat(full)
+	if err != nil || st.IsDir() || !videoExt[strings.ToLower(filepath.Ext(full))] {
+		return "", errors.New("not a video")
+	}
+	return full, nil
 }
 
 func getLibrary() []videoInfo {
@@ -1482,6 +1597,43 @@ func writeProgressEntry(abs string, entry *progressEntry) error {
 		return err
 	}
 	return os.Rename(tmp, file)
+}
+
+func forgetProgressUnder(dir string) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return
+	}
+	progressMu.Lock()
+	defer progressMu.Unlock()
+	file := progressFile()
+	all := map[string]progressEntry{}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return
+	}
+	if json.Unmarshal(b, &all) != nil {
+		return
+	}
+	changed := false
+	for path := range all {
+		if hasPathPrefix(path, dir) {
+			delete(all, path)
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	out, err := json.Marshal(all)
+	if err != nil {
+		return
+	}
+	tmp := file + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o644); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, file)
 }
 
 func serveProgress(w http.ResponseWriter, r *http.Request) {

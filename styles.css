@@ -103,6 +103,29 @@ img { display: block; max-width: 100%; }
 
 .user-row header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
+.user-open {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.user-open:hover { color: white; }
+
+.user-video {
+  display: block;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
 .pill {
   display: inline-block;
   padding: 2px 8px;
@@ -230,6 +253,7 @@ label.check,
 .sortbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 18px;
 }

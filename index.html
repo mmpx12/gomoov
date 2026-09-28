@@ -27,6 +27,7 @@
       <button type="button" id="account-btn" class="account-btn">Sign in</button>
       <div id="account-menu" class="info-menu account-menu" hidden>
         <button type="button" id="account-upload">Upload</button>
+        <button type="button" id="account-mine" hidden>My videos</button>
         <button type="button" id="account-users" hidden>Users</button>
         <button type="button" id="account-password" hidden>Change password</button>
         <button type="button" id="account-logout" hidden>Sign out</button>
@@ -104,6 +105,18 @@
     </form>
   </div>
 
+  <div id="user-confirm" class="modal-back" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-confirm-title">
+      <h2 id="user-confirm-title">Ban this account?</h2>
+      <p id="user-confirm-text" class="modal-path"></p>
+      <p id="user-confirm-error" class="modal-error" hidden></p>
+      <div class="modal-actions">
+        <button type="button" id="user-confirm-no">Cancel</button>
+        <button type="button" id="user-confirm-yes" class="danger">Ban</button>
+      </div>
+    </div>
+  </div>
+
   <div id="confirm" class="modal-back" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
       <h2 id="confirm-title">Remove this file?</h2>
@@ -156,6 +169,24 @@
       <button type="submit">Add user</button>
     </form>
     <div id="user-list"></div>
+    <section id="user-detail" class="auth-card stack" hidden>
+      <button type="button" id="user-back" class="text-btn">All users</button>
+      <h2 id="user-detail-name"></h2>
+      <p id="user-detail-status" class="modal-path"></p>
+      <label class="check"><input id="user-detail-upload" type="checkbox"> Can upload videos</label>
+      <form id="user-detail-pass" class="user-pass">
+        <input type="password" name="password" placeholder="New password" autocomplete="new-password" required>
+        <label class="check"><input type="checkbox" name="force"> Force change after login</label>
+        <button type="submit">Set password</button>
+      </form>
+      <div class="modal-actions">
+        <button type="button" id="user-ban">Ban</button>
+        <button type="button" id="user-delete" class="danger">Delete</button>
+      </div>
+      <p id="user-detail-error" class="modal-error" hidden></p>
+      <h3>Videos</h3>
+      <div id="user-videos"></div>
+    </section>
   </main>
 
   <main id="view-home" class="page">
@@ -175,6 +206,10 @@
       <label class="sort-group" id="sort-group" hidden>
         <input type="checkbox" id="group-folders">
         Group by folder
+      </label>
+      <label class="sort-group" id="mine-only-wrap" hidden>
+        <input type="checkbox" id="mine-only">
+        My videos
       </label>
     </div>
     <section id="continue-section" class="shelf" hidden>

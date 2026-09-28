@@ -3,6 +3,7 @@
 const STORAGE_KEY = "moovies.progress.v1";
 const VOLUME_KEY = "moovies.volume";
 const SORT_STORE = "moovies.sort";
+const MINE_ONLY = "moovies.mineOnly";
 const CONTINUE_COLLAPSE = "moovies.continueCollapsed";
 const FOLDER_COLLAPSE = "moovies.folderCollapsed";
 const THEATER_KEY = "moovies.theater";
@@ -61,6 +62,7 @@ let me = null;
 let sortKey = "name";
 let sortDesc = false;
 let groupByFolder = false;
+let mineOnly = false;
 let continueCollapsed = false;
 let current = null;
 let streamStart = 0;
@@ -347,10 +349,12 @@ function nextHTML(item) {
 }
 
 function filtered() {
+  let items = catalog;
+  if (mineOnly && me) items = items.filter((item) => item.mine);
   const q = searchInput.value.trim().toLowerCase();
-  if (!q) return catalog;
+  if (!q) return items;
   const words = q.split(/\s+/);
-  return catalog.filter((item) => {
+  return items.filter((item) => {
     const hay = (item.fullTitle + " " + item.series + " " + item.name).toLowerCase();
     return words.every((word) => hay.includes(word));
   });
@@ -363,6 +367,19 @@ const SORT_DIRS = {
   size: ["Smallest first", "Largest first"],
   path: ["A to Z", "Z to A"]
 };
+
+function syncMineControl() {
+  const wrap = document.getElementById("mine-only-wrap");
+  const box = document.getElementById("mine-only");
+  const menu = document.getElementById("account-mine");
+  if (wrap) wrap.hidden = !me;
+  if (box) box.checked = mineOnly;
+  if (menu) {
+    menu.hidden = !me;
+    menu.textContent = mineOnly ? "Show all videos" : "My videos";
+    menu.setAttribute("aria-pressed", mineOnly ? "true" : "false");
+  }
+}
 
 function loadSort() {
   try {
@@ -484,7 +501,8 @@ function renderHome() {
   continueRow.innerHTML = continuing.map((item) => cardHTML(item, "continue")).join("");
 
   if (!items.length) {
-    libraryEl.innerHTML = '<p class="empty">' + (q ? "No videos match “" + esc(q) + "”." : "No videos in this folder.") + "</p>";
+    const empty = q ? "No videos match “" + esc(q) + "”." : (mineOnly && me ? "No videos of yours yet." : "No videos in this folder.");
+    libraryEl.innerHTML = '<p class="empty">' + empty + "</p>";
     return;
   }
 
@@ -715,7 +733,7 @@ function parseRoute() {
   const q = hash.indexOf("?");
   const pathname = q === -1 ? hash : hash.slice(0, q);
   const params = new URLSearchParams(q === -1 ? "" : hash.slice(q + 1));
-  return { pathname, video: params.get("v") };
+  return { pathname, video: params.get("v"), user: params.get("u") };
 }
 
 function route() {
@@ -723,7 +741,7 @@ function route() {
     showPasswordGate(true);
     return;
   }
-  const { pathname, video: path } = parseRoute();
+  const { pathname, video: path, user: userID } = parseRoute();
   if (pathname === "/login") {
     if (me) {
       location.hash = "/";
@@ -737,7 +755,8 @@ function route() {
       location.hash = "/";
       return;
     }
-    showUsers();
+    if (userID) showUser(userID);
+    else showUsers();
     return;
   }
   if (pathname === "/watch" && path) {
@@ -1159,6 +1178,13 @@ document.getElementById("sort-dir").addEventListener("click", () => {
 document.getElementById("group-folders").addEventListener("change", (event) => {
   groupByFolder = event.target.checked;
   saveSort();
+  renderHome();
+});
+mineOnly = localStorage.getItem(MINE_ONLY) === "1";
+document.getElementById("mine-only").addEventListener("change", (event) => {
+  mineOnly = event.target.checked;
+  localStorage.setItem(MINE_ONLY, mineOnly ? "1" : "0");
+  syncMineControl();
   renderHome();
 });
 continueCollapsed = localStorage.getItem(CONTINUE_COLLAPSE) === "1";
@@ -1612,6 +1638,10 @@ document.addEventListener("keydown", (event) => {
       stopRefresh();
       return;
     }
+    if (!document.getElementById("user-confirm").hidden) {
+      closeUserConfirm();
+      return;
+    }
     if (!document.getElementById("confirm").hidden) {
       closeRemoveConfirm();
       return;
@@ -1697,6 +1727,7 @@ function renderAccount() {
     users.hidden = true;
     password.hidden = true;
     logout.hidden = true;
+    syncMineControl();
     return;
   }
   button.textContent = me.username;
@@ -1705,6 +1736,7 @@ function renderAccount() {
   users.textContent = me.admin && me.resetCount ? "Users (" + me.resetCount + ")" : "Users";
   password.hidden = false;
   logout.hidden = false;
+  syncMineControl();
 }
 
 async function loadMe() {
@@ -1746,8 +1778,61 @@ async function showUsers() {
   viewWatch.hidden = true;
   viewLogin.hidden = true;
   viewUsers.hidden = false;
+  document.getElementById("user-add").hidden = false;
+  document.getElementById("user-list").hidden = false;
+  document.getElementById("user-detail").hidden = true;
   document.title = "Users · Moovies";
   await renderUserList();
+}
+
+async function showUser(id) {
+  closeAccountMenu();
+  closeMenu();
+  viewHome.hidden = true;
+  viewWatch.hidden = true;
+  viewLogin.hidden = true;
+  viewUsers.hidden = false;
+  document.getElementById("user-add").hidden = true;
+  document.getElementById("user-list").hidden = true;
+  const detail = document.getElementById("user-detail");
+  detail.hidden = false;
+  detail.dataset.user = id;
+  closeUserConfirm();
+  document.getElementById("user-detail-error").hidden = true;
+  document.title = "User · Moovies";
+  const response = await fetch("/api/users?id=" + encodeURIComponent(id));
+  if (!response.ok) {
+    document.getElementById("user-detail-name").textContent = "User";
+    document.getElementById("user-detail-error").textContent = await apiError(response);
+    document.getElementById("user-detail-error").hidden = false;
+    document.getElementById("user-videos").innerHTML = "";
+    return;
+  }
+  const data = await response.json();
+  const user = data.user;
+  document.getElementById("user-detail-name").textContent = user.username;
+  const bits = [];
+  if (user.admin) bits.push("Admin");
+  if (user.banned) bits.push("Banned");
+  if (user.resetRequested) bits.push("Password reset requested");
+  if (user.mustChangePassword) bits.push("Must change password");
+  document.getElementById("user-detail-status").textContent = bits.join(" · ") || "Active";
+  const upload = document.getElementById("user-detail-upload");
+  upload.checked = !!user.canUpload;
+  upload.disabled = !!user.admin;
+  const ban = document.getElementById("user-ban");
+  const del = document.getElementById("user-delete");
+  ban.hidden = !!user.admin;
+  del.hidden = !!user.admin;
+  ban.textContent = user.banned ? "Unban" : "Ban";
+  const videos = data.videos || [];
+  document.getElementById("user-videos").innerHTML = videos.length
+    ? videos.map((item) => {
+        const decorated = decorate(item);
+        return '<a class="user-video" href="#/watch?v=' + encodeURIComponent(item.path) + '" data-video="' + esc(item.path) + '">' +
+          esc(decorated.fullTitle) + (item.private ? " · Private" : " · Public") + "</a>";
+      }).join("")
+    : '<p class="empty">No uploads yet.</p>';
 }
 
 function showPasswordGate(forced) {
@@ -1803,6 +1888,16 @@ document.getElementById("account-btn").addEventListener("click", (event) => {
   const width = menu.offsetWidth;
   menu.style.left = Math.max(8, rect.right - width) + "px";
   menu.style.top = (rect.bottom + 6) + "px";
+});
+
+document.getElementById("account-mine").addEventListener("click", () => {
+  closeAccountMenu();
+  mineOnly = !mineOnly;
+  localStorage.setItem(MINE_ONLY, mineOnly ? "1" : "0");
+  syncMineControl();
+  const here = location.hash.replace(/^#/, "") || "/";
+  if (here !== "/") location.hash = "/";
+  showHome();
 });
 
 document.getElementById("account-upload").addEventListener("click", () => {
@@ -2022,47 +2117,49 @@ async function renderUserList() {
   }
   const data = await response.json();
   host.innerHTML = (data.users || []).map((user) => (
-    '<article class="user-row" data-user="' + esc(user.id) + '">' +
-      "<header><strong>" + esc(user.username) + "</strong>" +
+    '<article class="user-row">' +
+      '<button type="button" class="user-open" data-user-open="' + esc(user.id) + '">' +
+        "<span>" + esc(user.username) + "</span>" +
         (user.admin ? '<span class="pill">Admin</span>' : "") +
+        (user.banned ? '<span class="pill warn">Banned</span>' : "") +
         (user.resetRequested ? '<span class="pill warn">Password reset requested</span>' : "") +
         (user.mustChangePassword ? '<span class="pill">Must change password</span>' : "") +
-      "</header>" +
-      '<label class="check"><input type="checkbox" data-upload ' + (user.canUpload ? "checked" : "") + (user.admin ? " disabled" : "") + "> Can upload videos</label>" +
-      '<form class="user-pass" data-pass-form>' +
-        '<input type="password" name="password" placeholder="New password" autocomplete="new-password" required>' +
-        '<label class="check"><input type="checkbox" name="force" ' + (user.resetRequested ? "checked" : "") + "> Force change after login</label>" +
-        '<button type="submit">Set password</button>' +
-      "</form>" +
-      '<p class="modal-error" data-user-error hidden></p>' +
+      "</button>" +
     "</article>"
   )).join("") || '<p class="empty">No users yet.</p>';
 }
 
-document.getElementById("user-list").addEventListener("change", async (event) => {
-  const box = event.target.closest("[data-upload]");
-  if (!box) return;
-  const row = box.closest("[data-user]");
+document.getElementById("user-list").addEventListener("click", (event) => {
+  const open = event.target.closest("[data-user-open]");
+  if (!open) return;
+  location.hash = "/users?u=" + encodeURIComponent(open.dataset.userOpen);
+});
+
+document.getElementById("user-back").addEventListener("click", () => {
+  location.hash = "/users";
+});
+
+document.getElementById("user-detail-upload").addEventListener("change", async (event) => {
+  const id = document.getElementById("user-detail").dataset.user;
+  const box = event.target;
   const response = await fetch("/api/users", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: row.dataset.user, canUpload: box.checked })
+    body: JSON.stringify({ id, canUpload: box.checked })
   });
   if (!response.ok) box.checked = !box.checked;
 });
 
-document.getElementById("user-list").addEventListener("submit", async (event) => {
-  const form = event.target.closest("[data-pass-form]");
-  if (!form) return;
+document.getElementById("user-detail-pass").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const row = form.closest("[data-user]");
-  const error = row.querySelector("[data-user-error]");
+  const form = event.target;
+  const error = document.getElementById("user-detail-error");
   error.hidden = true;
   const response = await fetch("/api/users", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      id: row.dataset.user,
+      id: document.getElementById("user-detail").dataset.user,
       password: form.password.value,
       mustChangePassword: form.force.checked
     })
@@ -2073,8 +2170,77 @@ document.getElementById("user-list").addEventListener("submit", async (event) =>
     return;
   }
   form.reset();
-  await loadMe();
-  await renderUserList();
+  await showUser(document.getElementById("user-detail").dataset.user);
+});
+
+let userConfirmAction = "";
+
+function openUserConfirm(action) {
+  const name = document.getElementById("user-detail-name").textContent;
+  const title = document.getElementById("user-confirm-title");
+  const text = document.getElementById("user-confirm-text");
+  const yes = document.getElementById("user-confirm-yes");
+  userConfirmAction = action;
+  document.getElementById("user-confirm-error").hidden = true;
+  if (action === "ban") {
+    title.textContent = "Ban this account?";
+    text.textContent = name + " will be signed out and will not be able to sign in.";
+    yes.textContent = "Ban";
+  } else if (action === "unban") {
+    title.textContent = "Unban this account?";
+    text.textContent = name + " will be able to sign in again.";
+    yes.textContent = "Unban";
+  } else {
+    title.textContent = "Delete this account?";
+    text.textContent = name + " and the videos they uploaded will be removed.";
+    yes.textContent = "Delete";
+  }
+  document.getElementById("user-confirm").hidden = false;
+}
+
+function closeUserConfirm() {
+  document.getElementById("user-confirm").hidden = true;
+  userConfirmAction = "";
+}
+
+document.getElementById("user-ban").addEventListener("click", () => {
+  openUserConfirm(document.getElementById("user-ban").textContent === "Ban" ? "ban" : "unban");
+});
+
+document.getElementById("user-delete").addEventListener("click", () => {
+  openUserConfirm("delete");
+});
+
+document.getElementById("user-confirm-no").addEventListener("click", closeUserConfirm);
+document.getElementById("user-confirm").addEventListener("click", (event) => {
+  if (event.target.id === "user-confirm") closeUserConfirm();
+});
+
+document.getElementById("user-confirm-yes").addEventListener("click", async () => {
+  const error = document.getElementById("user-confirm-error");
+  const detailError = document.getElementById("user-detail-error");
+  error.hidden = true;
+  const id = document.getElementById("user-detail").dataset.user;
+  const action = userConfirmAction;
+  const response = action === "delete"
+    ? await fetch("/api/users?id=" + encodeURIComponent(id), { method: "DELETE" })
+    : await fetch("/api/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, banned: action === "ban" })
+      });
+  if (!response.ok) {
+    error.textContent = await apiError(response);
+    error.hidden = false;
+    return;
+  }
+  closeUserConfirm();
+  detailError.hidden = true;
+  if (action === "delete") {
+    location.hash = "/users";
+    return;
+  }
+  await showUser(id);
 });
 
 document.body.addEventListener("click", (event) => {

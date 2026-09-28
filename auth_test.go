@@ -213,6 +213,79 @@ func TestAuthPrivacyAndPasswords(t *testing.T) {
 	}
 }
 
+func TestBanAndDeleteUser(t *testing.T) {
+	withAuth(t)
+	admin := cookieOf(t, postJSON("/api/login", map[string]string{"username": "admin", "password": "admin"}, nil))
+	created := postJSON("/api/users", map[string]any{
+		"username": "ada", "password": "secret", "canUpload": true,
+	}, admin)
+	if created.Code != http.StatusOK {
+		t.Fatal(created.Body.String())
+	}
+	var createdBody struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createdBody); err != nil {
+		t.Fatal(err)
+	}
+	id := createdBody.User.ID
+	ada := cookieOf(t, postJSON("/api/login", map[string]string{"username": "ada", "password": "secret"}, nil))
+	if up := uploadFile(t, ada, "clip.mkv", "1"); up.Code != http.StatusOK {
+		t.Fatal(up.Body.String())
+	}
+	dir := filepath.Join(uploadRoot, id)
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatal(err)
+	}
+	banned := sendJSON(http.MethodPut, "/api/users", map[string]any{"id": id, "banned": true}, admin)
+	if banned.Code != http.StatusOK {
+		t.Fatalf("ban %d %s", banned.Code, banned.Body.String())
+	}
+	if rec := postJSON("/api/login", map[string]string{"username": "ada", "password": "secret"}, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("banned login %d %s", rec.Code, rec.Body.String())
+	}
+	me := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(ada)
+	handle(me, req)
+	if !bytes.Contains(me.Body.Bytes(), []byte(`"user":null`)) {
+		t.Fatalf("banned session still active: %s", me.Body.String())
+	}
+	detail := httptest.NewRecorder()
+	dreq := httptest.NewRequest(http.MethodGet, "/api/users?id="+id, nil)
+	dreq.AddCookie(admin)
+	handle(detail, dreq)
+	if detail.Code != http.StatusOK || !bytes.Contains(detail.Body.Bytes(), []byte(`"banned":true`)) || !bytes.Contains(detail.Body.Bytes(), []byte(`"videos"`)) {
+		t.Fatalf("detail %d %s", detail.Code, detail.Body.String())
+	}
+	adminUser, _ := findUser("admin")
+	if rec := sendJSON(http.MethodPut, "/api/users", map[string]any{"id": adminUser.ID, "banned": true}, admin); rec.Code != http.StatusBadRequest {
+		t.Fatalf("ban admin %d %s", rec.Code, rec.Body.String())
+	}
+	adminDel := httptest.NewRecorder()
+	adminDelReq := httptest.NewRequest(http.MethodDelete, "/api/users?id="+adminUser.ID, nil)
+	adminDelReq.AddCookie(admin)
+	handle(adminDel, adminDelReq)
+	if adminDel.Code != http.StatusBadRequest {
+		t.Fatalf("delete admin %d %s", adminDel.Code, adminDel.Body.String())
+	}
+	deleted := httptest.NewRecorder()
+	del := httptest.NewRequest(http.MethodDelete, "/api/users?id="+id, nil)
+	del.AddCookie(admin)
+	handle(deleted, del)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete %d %s", deleted.Code, deleted.Body.String())
+	}
+	if _, ok := findUser("ada"); ok {
+		t.Fatal("deleted user still exists")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("upload directory still present: %v", err)
+	}
+}
+
 func uploadFile(t *testing.T, cookie *http.Cookie, name, private string) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
