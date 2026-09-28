@@ -15,8 +15,11 @@ func withAuth(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	oldConfig, oldUpload, oldRoot, oldIter := configDir, uploadRoot, root, pbkdf2Iter
+	oldPlayer := videoPlayer
+	videoPlayer = false
 	t.Cleanup(func() {
 		configDir, uploadRoot, root, pbkdf2Iter = oldConfig, oldUpload, oldRoot, oldIter
+		videoPlayer = oldPlayer
 		authMu.Lock()
 		users = nil
 		sessions = nil

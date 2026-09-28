@@ -1,0 +1,16 @@
+[Unit]
+Description=gomoov user-mode video library
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+@USER_LINE@
+@HOME_LINE@
+WorkingDirectory=@LIBRARY@
+ExecStart=@BINDIR@/gomoov -U
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=@WANTED@

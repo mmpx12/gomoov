@@ -123,8 +123,11 @@ func TestExternalIncludeAndUploads(t *testing.T) {
 	other := t.TempDir()
 	ups := t.TempDir()
 	oldRoot, oldUpload := root, uploadRoot
+	oldPlayer := videoPlayer
+	videoPlayer = false
 	t.Cleanup(func() {
 		root, uploadRoot = oldRoot, oldUpload
+		videoPlayer = oldPlayer
 		includeDirs, excludeDirs = nil, nil
 		authMu.Lock()
 		visibility = nil

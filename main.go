@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.8"
+const version = "1.0.10"
 
 var (
 	root  string
@@ -91,9 +91,9 @@ var (
 	includeDirs []string
 	excludeDirs []string
 
-	// videoPlayer hides accounts and private uploads, like the original player.
+	// videoPlayer hides accounts and private uploads. It is the default.
 	// showPrivate includes those uploads while video player mode is on.
-	videoPlayer bool
+	videoPlayer = true
 	showPrivate bool
 )
 
@@ -126,17 +126,19 @@ func usage() {
 Usage:
   gomoov [flags]
 
-Run it in the folder that holds the videos. Paths may be absolute or relative
-to that folder. A leading ~/ is your home directory. -i may point at a folder
-outside the one you started in. Uploads in ~/gomoov stay available either way.
+Run it in the folder that holds the videos. A plain launch is the simple
+player: no sign-in, and private uploads stay hidden. -U turns on accounts.
+Paths may be absolute or relative to that folder. A leading ~/ is your home
+directory. -i may point at a folder outside the one you started in. Uploads
+in ~/gomoov stay available either way.
 
 Flags:
   -h, --help                 show this help and exit
   -H, --host ADDR            listen address (overrides HOST, default 0.0.0.0)
   -p, --port PORT            listen port (overrides PORT, default 8080)
   -V, --version              print version and exit
-  -v, --videoplayer          simple player: hide accounts and private videos
-      --show-private         with -v, also show private videos (-p is the port)
+  -U, --user-mode            accounts, uploads, and private videos
+      --show-private         in the simple player, also show private videos
   -m, --movie PATH           open this video in a browser
   -i, --include DIR          only scan these directories
   -e, --exclude DIR          skip these directories
@@ -192,7 +194,7 @@ type probeEntry struct {
 
 func main() {
 	var hostFlag, portFlag, movieFlag string
-	var versionFlag bool
+	var versionFlag, userModeFlag bool
 	var includes, excludes multiFlag
 
 	flag.Usage = usage
@@ -202,9 +204,9 @@ func main() {
 	flag.StringVar(&portFlag, "p", "", "listen port (overrides PORT)")
 	flag.BoolVar(&versionFlag, "version", false, "print version and exit")
 	flag.BoolVar(&versionFlag, "V", false, "print version and exit")
-	flag.BoolVar(&videoPlayer, "videoplayer", false, "simple player without accounts or private videos")
-	flag.BoolVar(&videoPlayer, "v", false, "simple player without accounts or private videos")
-	flag.BoolVar(&showPrivate, "show-private", false, "with -v, include private videos")
+	flag.BoolVar(&userModeFlag, "user-mode", false, "accounts, uploads, and private videos")
+	flag.BoolVar(&userModeFlag, "U", false, "accounts, uploads, and private videos")
+	flag.BoolVar(&showPrivate, "show-private", false, "in the simple player, include private videos")
 	flag.StringVar(&movieFlag, "movie", "", "open this video in a browser")
 	flag.StringVar(&movieFlag, "m", "", "open this video in a browser")
 	flag.Var(&includes, "include", "only scan these directories")
@@ -217,6 +219,7 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	videoPlayer = !userModeFlag
 	if versionFlag {
 		fmt.Println("gomoov " + version)
 		return
