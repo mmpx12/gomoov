@@ -2,13 +2,24 @@
 
 gomoov is a local web player for the video files in a folder. A normal launch is that player. Accounts, uploads, and private videos are there when you start it with `--user-mode`.
 
-The page, script, and stylesheet are built into the `gomoov` binary. Playback uses `ffmpeg` and `ffprobe`, which stay installed on the machine.
+The page, script, and stylesheet are built into the `gomoov` binary. Playback uses `ffmpeg` and `ffprobe`. A normal build uses the ones on `PATH`. `make with-ffmpeg` downloads a static GPL build and packs both programs into the binary so the machine does not need them installed.
 
 ## Requirements
 
 - Go 1.22 or newer, to build
-- `ffmpeg` and `ffprobe` on `PATH`
+- `ffmpeg` and `ffprobe` on `PATH`, unless you build with `make with-ffmpeg`
 - A browser on the machine that will watch
+
+## Optional bundled ffmpeg
+
+`make with-ffmpeg` downloads a static Linux x86_64 GPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases/latest) (this includes libx264), then compiles gomoov with those binaries inside it. On startup they are unpacked to `~/.gomoov/bin`. The resulting program is much larger, and the GPL applies to that build because of libx264.
+
+```bash
+make with-ffmpeg
+make install-with-ffmpeg
+```
+
+`FFMPEG_URL` selects another archive if you need a different architecture, for example the arm64 asset from the same release. The archive must contain `bin/ffmpeg` and `bin/ffprobe`. A plain `make` does not download anything and keeps using the system tools.
 
 ## Build and install
 

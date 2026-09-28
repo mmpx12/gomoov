@@ -2,13 +2,31 @@ PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 LIBRARY ?= $(CURDIR)
 SERVICE ?= gomoov
+# Static GPL build (includes libx264). linux x86_64. Override for another arch.
+FFMPEG_URL ?= https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
 
-.PHONY: all install install-service install-user-service
+.PHONY: all install install-service install-user-service fetch-ffmpeg with-ffmpeg install-with-ffmpeg
 
 all: gomoov
 
-gomoov: main.go auth.go index.html app.js styles.css go.mod
+gomoov: $(wildcard *.go) index.html app.js styles.css go.mod
 	go build -o gomoov .
+
+# Download static ffmpeg and ffprobe, then pack them into the gomoov binary.
+fetch-ffmpeg:
+	mkdir -p build/ffmpeg-src build/ffmpeg
+	curl -fL --retry 3 -o build/ffmpeg.tar.xz "$(FFMPEG_URL)"
+	tar -xJf build/ffmpeg.tar.xz -C build/ffmpeg-src --strip-components=1
+	cp build/ffmpeg-src/bin/ffmpeg build/ffmpeg-src/bin/ffprobe build/ffmpeg/
+	chmod 755 build/ffmpeg/ffmpeg build/ffmpeg/ffprobe
+	build/ffmpeg/ffmpeg -version | head -n 1
+
+with-ffmpeg: fetch-ffmpeg
+	go build -tags embedffmpeg -o gomoov .
+
+install-with-ffmpeg: with-ffmpeg
+	install -d "$(BINDIR)"
+	install -m 755 gomoov "$(BINDIR)/gomoov"
 
 install: gomoov
 	install -d "$(BINDIR)"

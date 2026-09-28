@@ -34,7 +34,7 @@ import (
 var web embed.FS
 
 // version is increased on every change.
-const version = "1.0.14"
+const version = "1.0.15"
 
 var (
 	root  string
@@ -238,6 +238,9 @@ func main() {
 		log.Fatal(err)
 	}
 	if err := initAuthPaths(); err != nil {
+		log.Fatal(err)
+	}
+	if err := prepareFFmpeg(); err != nil {
 		log.Fatal(err)
 	}
 	if err := loadSettings(); err != nil {
@@ -1210,7 +1213,7 @@ func probe(path string) *videoInfo {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path).Output()
+	out, err := exec.CommandContext(ctx, toolBin("ffprobe"), "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path).Output()
 	if err != nil {
 		log.Printf("probe failed for %s: %v", rel, err)
 		return nil
@@ -1372,7 +1375,7 @@ func thumbFile(path string) []byte {
 	thumbSlots <- struct{}{}
 	for _, ss := range samples {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+		cmd := exec.CommandContext(ctx, toolBin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
 			"-ss", fmt.Sprintf("%.3f", ss), "-i", path,
 			"-frames:v", "1", "-vf", "scale=640:-2,format=yuvj420p",
 			"-q:v", "4", "-f", "image2", "pipe:1")
@@ -1395,7 +1398,7 @@ func ffmpegHasReadrate() bool {
 	readrateOnce.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-h", "full").CombinedOutput()
+		out, err := exec.CommandContext(ctx, toolBin("ffmpeg"), "-hide_banner", "-h", "full").CombinedOutput()
 		readrate = err == nil && strings.Contains(string(out), "-readrate")
 	})
 	return readrate
@@ -1444,7 +1447,7 @@ func keyframeAt(path string, requested float64) float64 {
 	for _, window := range []float64{30, 90} {
 		begin := math.Max(0, requested-window)
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		out, err := exec.CommandContext(ctx, "ffprobe", "-v", "error",
+		out, err := exec.CommandContext(ctx, toolBin("ffprobe"), "-v", "error",
 			"-select_streams", "v:0", "-skip_frame", "nokey",
 			"-show_entries", "frame=pts_time", "-of", "csv=p=0",
 			"-read_intervals", fmt.Sprintf("%.3f%%%.3f", begin, requested+0.05),
@@ -1496,7 +1499,7 @@ func streamArgs(path string, start float64, quality, audio int, burn *int) []str
 	}
 	scale := quality != 0 && height != 0 && quality < height-8
 	transcode := videoCodec != "h264" || scale || burn != nil
-	args := []string{"ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", fmt.Sprintf("%.3f", start)}
+	args := []string{toolBin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", fmt.Sprintf("%.3f", start)}
 	if ffmpegHasReadrate() {
 		args = append(args, "-readrate", "1.5")
 	}
@@ -1558,7 +1561,7 @@ func subsVTT(path string, id int) []byte {
 	_ = os.MkdirAll(filepath.Dir(dest), 0o755)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	data, err := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+	data, err := exec.CommandContext(ctx, toolBin("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
 		"-i", path, "-map", fmt.Sprintf("0:s:%d", id), "-f", "webvtt", "pipe:1").Output()
 	if err != nil {
 		log.Printf("subs failed for %s #%d: %v", relOf(path), id, err)
