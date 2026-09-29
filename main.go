@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"embed"
@@ -12,6 +13,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"log"
 	"math"
@@ -37,7 +40,7 @@ var web embed.FS
 var brandLogos embed.FS
 
 // version is increased on every change.
-const version = "1.0.32"
+const version = "1.0.33"
 
 // probeVer invalidates cached probes when the stored shape changes.
 const probeVer = 2
@@ -1581,7 +1584,7 @@ func thumbFile(path string) []byte {
 	if err != nil {
 		return nil
 	}
-	key := fmt.Sprintf("%s:%d:%d:v3", relOf(path), st.Size(), st.ModTime().UnixNano())
+	key := fmt.Sprintf("%s:%d:%d:v4", relOf(path), st.Size(), st.ModTime().UnixNano())
 	sum := sha1.Sum([]byte(key))
 	dest := filepath.Join(cache, "thumbs", fmt.Sprintf("%x.jpg", sum))
 	lock := thumbLock(dest)
@@ -1598,10 +1601,16 @@ func thumbFile(path string) []byte {
 		<-thumbSlots
 		return data
 	}
+	save := func(data []byte) []byte {
+		if len(data) == 0 {
+			return nil
+		}
+		_ = os.WriteFile(dest, data, 0o644)
+		return data
+	}
 	if info != nil && info.HasCover {
-		if data := try([]string{"-i", path, "-map", fmt.Sprintf("0:v:%d", info.CoverIndex)}); data != nil {
-			_ = os.WriteFile(dest, data, 0o644)
-			return data
+		if data := try([]string{"-i", path, "-map", fmt.Sprintf("0:v:%d", info.CoverIndex)}); stillUsable(data) {
+			return save(data)
 		}
 	}
 	poster := 8.0
@@ -1611,9 +1620,8 @@ func thumbFile(path string) []byte {
 			poster = math.Max(0, duration*0.1)
 		}
 	}
-	if data := try([]string{"-ss", fmt.Sprintf("%.3f", poster), "-i", path}); data != nil {
-		_ = os.WriteFile(dest, data, 0o644)
-		return data
+	if data := try([]string{"-ss", fmt.Sprintf("%.3f", poster), "-i", path}); stillUsable(data) {
+		return save(data)
 	}
 
 	samples := []float64{}
@@ -1622,20 +1630,79 @@ func thumbFile(path string) []byte {
 		samples = append(samples, at)
 	}
 	var best []byte
+	var bestScore float64
 	thumbSlots <- struct{}{}
 	for _, ss := range samples {
 		data := ffmpegJPEG([]string{"-ss", fmt.Sprintf("%.3f", ss), "-i", path})
-		if len(data) > len(best) {
+		score := stillScore(data)
+		if score > bestScore {
 			best = data
+			bestScore = score
+		}
+		if stillUsable(data) {
+			break
 		}
 	}
 	<-thumbSlots
-	if len(best) < 800 {
+	if !stillUsable(best) {
 		log.Printf("thumb failed for %s", relOf(path))
-		return nil
+		if len(best) < 800 {
+			return nil
+		}
 	}
-	_ = os.WriteFile(dest, best, 0o644)
-	return best
+	return save(best)
+}
+
+// stillUsable reports whether a captured frame has enough contrast to use as
+// a poster. A black or solid-color intro encodes as a tiny JPEG and used to
+// be cached, which left the card blank.
+func stillUsable(data []byte) bool {
+	return stillScore(data) >= 12
+}
+
+func stillScore(data []byte) float64 {
+	if len(data) < 800 {
+		return 0
+	}
+	img, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return 0
+	}
+	b := img.Bounds()
+	if b.Dx() < 2 || b.Dy() < 2 {
+		return 0
+	}
+	stepX := max(1, b.Dx()/40)
+	stepY := max(1, b.Dy()/40)
+	var sum, sumsq, n float64
+	sample := func(v float64) {
+		sum += v
+		sumsq += v * v
+		n++
+	}
+	if ycc, ok := img.(*image.YCbCr); ok {
+		for y := b.Min.Y; y < b.Max.Y; y += stepY {
+			for x := b.Min.X; x < b.Max.X; x += stepX {
+				sample(float64(ycc.Y[ycc.YOffset(x, y)]))
+			}
+		}
+	} else {
+		for y := b.Min.Y; y < b.Max.Y; y += stepY {
+			for x := b.Min.X; x < b.Max.X; x += stepX {
+				r, g, bl, _ := img.At(x, y).RGBA()
+				sample((0.2126*float64(r) + 0.7152*float64(g) + 0.0722*float64(bl)) / 256)
+			}
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	mean := sum / n
+	variance := sumsq/n - mean*mean
+	if variance < 0 {
+		return 0
+	}
+	return math.Sqrt(variance)
 }
 
 func ffmpegHasReadrate() bool {

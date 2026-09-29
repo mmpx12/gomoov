@@ -358,7 +358,8 @@ function setStatus(text) {
 }
 
 function thumbURL(videoFile) {
-  return "/thumb?path=" + encodeURIComponent(videoFile.path) + "&v=" + encodeURIComponent(String(videoFile.mtime));
+  // v4 skips the solid-color intro frame. The extra token keeps a cached black JPEG from sticking.
+  return "/thumb?path=" + encodeURIComponent(videoFile.path) + "&v=" + encodeURIComponent(String(videoFile.mtime) + ":v4");
 }
 
 function streamURL(path, t) {

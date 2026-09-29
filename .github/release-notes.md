@@ -1,4 +1,4 @@
-`go install github.com/mmpx12/gomoov@latest` installs this version. The module path matches the repository.
+Posters skip a black or solid-color opening frame, so a title that starts dark still gets a thumbnail. `go install github.com/mmpx12/gomoov@latest` installs this version. The module path matches the repository.
 
 The header uses the brutalist gomoov mark again. A series is one card, the next episode starts after a countdown, and Continue watching, Watch later, and Recently added follow the signed-in account. A `.srt` or `.vtt` next to a movie is a subtitle, the library can filter watched titles, and the timeline shows a preview while you drag it.
 
