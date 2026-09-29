@@ -63,6 +63,12 @@ make
 make install
 ```
 
+Go can install the latest release straight from the repository:
+
+```bash
+go install github.com/mmpx12/gomoov@latest
+```
+
 `make install` copies the binary to `~/.local/bin/gomoov`. `PREFIX` and `BINDIR` change that location:
 
 ```bash
