@@ -30,7 +30,7 @@ var (
 
 func validTheme(theme string) bool {
 	switch theme {
-	case "dark", "white", "cyber-green", "fancy", "neon", "cyberpunk", "retro", "ocean", "sunset":
+	case "dark", "white", "cyber-green", "fancy", "neon", "cyberpunk", "retro", "ocean", "sunset", "amber", "lavender":
 		return true
 	default:
 		return false

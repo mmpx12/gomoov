@@ -2483,8 +2483,8 @@ async function loadMe() {
   const data = await response.json();
   videoPlayer = !!data.videoPlayer;
   me = data.user || null;
-  const account = document.querySelector(".account");
-  if (account) account.hidden = videoPlayer;
+  document.getElementById("player-theme-btn").hidden = !videoPlayer;
+  document.getElementById("account-btn").hidden = videoPlayer;
   renderAccount();
 }
 
@@ -2639,6 +2639,7 @@ document.getElementById("account-btn").addEventListener("click", (event) => {
     closeAccountMenu();
     return;
   }
+  closeThemeMenu();
   menu.hidden = false;
   document.getElementById("account-btn").setAttribute("aria-expanded", "true");
   const rect = document.getElementById("account-btn").getBoundingClientRect();
@@ -3005,9 +3006,58 @@ document.getElementById("user-confirm-yes").addEventListener("click", async () =
 
 document.body.addEventListener("click", (event) => {
   if (!event.target.closest("#account-menu") && !event.target.closest("#account-btn")) closeAccountMenu();
+  if (!event.target.closest("#player-theme-menu") && !event.target.closest("#player-theme-btn")) closeThemeMenu();
 });
 
-const THEMES = ["dark", "white", "cyber-green", "fancy", "neon", "cyberpunk", "retro", "ocean", "sunset"];
+const THEME_CHOICES = [
+  ["dark", "Dark"],
+  ["white", "White"],
+  ["cyber-green", "Cyber green"],
+  ["fancy", "Fancy"],
+  ["neon", "Neon"],
+  ["cyberpunk", "Cyberpunk"],
+  ["retro", "Retro"],
+  ["ocean", "Ocean"],
+  ["sunset", "Sunset"],
+  ["amber", "Amber"],
+  ["lavender", "Lavender"]
+];
+
+const THEMES = THEME_CHOICES.map((choice) => choice[0]);
+
+function closeThemeMenu() {
+  const menu = document.getElementById("player-theme-menu");
+  const button = document.getElementById("player-theme-btn");
+  if (menu) menu.hidden = true;
+  if (button) button.setAttribute("aria-expanded", "false");
+}
+
+function themeListHTML(includeDefault) {
+  const rows = [];
+  if (includeDefault) {
+    rows.push('<button type="button" class="theme-choice" role="option" data-theme-choice="">Site default</button>');
+  }
+  for (const [id, label] of THEME_CHOICES) {
+    rows.push('<button type="button" class="theme-choice" role="option" data-theme="' + id + '" data-theme-choice="' + id + '">' + label + "</button>");
+  }
+  return rows.join("");
+}
+
+function paintThemeList(root, value) {
+  if (!root) return;
+  root.querySelectorAll("[data-theme-choice]").forEach((button) => {
+    button.setAttribute("aria-selected", button.dataset.themeChoice === value ? "true" : "false");
+  });
+}
+
+function renderThemeMenus() {
+  const player = document.getElementById("player-theme-list");
+  const user = document.getElementById("user-theme-picker");
+  const admin = document.getElementById("admin-theme-picker");
+  if (player && !player.childElementCount) player.innerHTML = themeListHTML(false);
+  if (user && !user.childElementCount) user.innerHTML = themeListHTML(true);
+  if (admin && !admin.childElementCount) admin.innerHTML = themeListHTML(false);
+}
 
 function knownTheme(name) {
   return THEMES.includes(name);
@@ -3021,11 +3071,14 @@ function effectiveTheme() {
 }
 
 function applyTheme() {
-  document.documentElement.dataset.theme = effectiveTheme();
-  const pick = document.getElementById("user-theme");
-  if (!pick) return;
+  const theme = effectiveTheme();
+  document.documentElement.dataset.theme = theme;
   const local = localStorage.getItem(THEME_KEY);
-  pick.value = knownTheme(local) ? local : (me && knownTheme(me.theme) ? me.theme : "");
+  const personal = knownTheme(local) ? local : (me && knownTheme(me.theme) ? me.theme : "");
+  const pick = document.getElementById("user-theme");
+  if (pick) pick.value = personal;
+  paintThemeList(document.getElementById("user-theme-picker"), personal);
+  paintThemeList(document.getElementById("player-theme-menu"), theme);
 }
 
 function showSettings(tab) {
@@ -3125,6 +3178,7 @@ async function loadAdminSettings() {
   if (knownTheme(data.theme)) {
     siteTheme = data.theme;
     document.getElementById("admin-theme").value = data.theme;
+    paintThemeList(document.getElementById("admin-theme-picker"), data.theme);
   }
   document.getElementById("basic-on").checked = !!data.basicAuth;
   document.getElementById("basic-user").value = data.basicUser || "";
@@ -3231,6 +3285,53 @@ document.getElementById("settings-password-form").addEventListener("submit", asy
   note.textContent = "Password saved.";
   note.hidden = false;
   note.style.color = "var(--muted)";
+});
+
+renderThemeMenus();
+
+function placeMenu(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)) + "px";
+  const below = rect.bottom + 6;
+  menu.style.top = (below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 8) : below) + "px";
+}
+
+document.getElementById("player-theme-btn").addEventListener("click", (event) => {
+  event.stopPropagation();
+  closeAccountMenu();
+  const menu = document.getElementById("player-theme-menu");
+  if (!menu.hidden) {
+    closeThemeMenu();
+    return;
+  }
+  menu.hidden = false;
+  event.currentTarget.setAttribute("aria-expanded", "true");
+  placeMenu(menu, event.currentTarget);
+});
+
+document.getElementById("player-theme-menu").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-theme-choice]");
+  if (!button) return;
+  chooseTheme(button.dataset.themeChoice);
+  closeThemeMenu();
+});
+
+document.getElementById("user-theme-picker").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-theme-choice]");
+  if (!button) return;
+  document.getElementById("user-theme").value = button.dataset.themeChoice;
+  paintThemeList(event.currentTarget, button.dataset.themeChoice);
+});
+
+document.getElementById("admin-theme-picker").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-theme-choice]");
+  if (!button) return;
+  document.getElementById("admin-theme").value = button.dataset.themeChoice;
+  paintThemeList(event.currentTarget, button.dataset.themeChoice);
 });
 
 document.getElementById("settings-theme-form").addEventListener("submit", async (event) => {

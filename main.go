@@ -39,8 +39,8 @@ var web embed.FS
 //go:embed brand/*.png
 var brandLogos embed.FS
 
-// version is increased on every change.
-const version = "1.0.33"
+// version changes only when a release is cut.
+const version = "1.0.34"
 
 // probeVer invalidates cached probes when the stored shape changes.
 const probeVer = 2

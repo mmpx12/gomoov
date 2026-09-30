@@ -1,3 +1,5 @@
+Without accounts, the header menu icon opens Theme and the theme list. The choice stays in the browser. Settings and Admin use the same list. The selected row, and the row under the pointer, use that theme's own colors. Amber and Lavender are new themes. In Cyber green, section titles such as Continue watching and Library are phosphor green, while movie names keep their color.
+
 Posters skip a black or solid-color opening frame, so a title that starts dark still gets a thumbnail. `go install github.com/mmpx12/gomoov@latest` installs this version. The module path matches the repository.
 
 The header uses the brutalist gomoov mark again. A series is one card, the next episode starts after a countdown, and Continue watching, Watch later, and Recently added follow the signed-in account. A `.srt` or `.vtt` next to a movie is a subtitle, the library can filter watched titles, and the timeline shows a preview while you drag it.
