@@ -33,21 +33,9 @@
       <input id="search" type="search" placeholder="Search" autocomplete="off" aria-label="Search videos">
     </form>
     <div class="account">
-      <button type="button" id="player-theme-btn" class="account-btn" hidden aria-label="Menu" aria-haspopup="menu" aria-expanded="false" aria-controls="player-theme-menu">
+      <button type="button" id="player-theme-btn" class="account-btn" hidden aria-label="Menu" aria-haspopup="dialog" aria-expanded="false" aria-controls="player-theme-menu">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
-      <div id="player-theme-menu" class="info-menu account-menu" hidden>
-        <button type="button" id="theme-submenu-btn" class="theme-submenu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="player-theme-list">
-          Theme
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <div id="player-theme-list" class="info-menu account-menu theme-picker theme-submenu" role="listbox" aria-label="Theme" hidden></div>
-        <div class="menu-about">
-          <p class="theme-menu-label">About</p>
-          <p class="menu-about-version" data-app-version></p>
-          <a href="https://github.com/mmpx12/gomoov" target="_blank" rel="noopener noreferrer">github.com/mmpx12/gomoov</a>
-        </div>
-      </div>
       <button type="button" id="account-btn" class="account-btn">Sign in</button>
       <div id="account-menu" class="info-menu account-menu" hidden>
         <button type="button" id="account-upload">Upload</button>
@@ -82,6 +70,51 @@
     <button type="button" id="info-privacy" class="info-action" hidden>Make private</button>
     <button type="button" id="info-watched" class="info-action">Mark watched</button>
     <button type="button" id="info-remove" class="info-remove">Remove</button>
+  </div>
+
+  <div id="player-theme-menu" class="modal-back" hidden>
+    <div class="modal theme-dialog" role="dialog" aria-modal="true" aria-labelledby="player-theme-title">
+      <div class="theme-dialog-h">
+        <h2 id="player-theme-title">Theme</h2>
+        <button type="button" id="player-theme-close">Close</button>
+      </div>
+      <div id="player-theme-list" class="theme-picker" role="listbox" aria-label="Theme"></div>
+      <div class="menu-about">
+        <p class="theme-menu-label">About</p>
+        <p class="menu-about-version" data-app-version></p>
+        <a href="https://github.com/mmpx12/gomoov" target="_blank" rel="noopener noreferrer">github.com/mmpx12/gomoov</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="sort-dialog" class="modal-back" hidden>
+    <div class="modal theme-dialog" role="dialog" aria-modal="true" aria-labelledby="sort-dialog-title">
+      <div class="theme-dialog-h">
+        <h2 id="sort-dialog-title">Sort</h2>
+        <button type="button" id="sort-dialog-close">Close</button>
+      </div>
+      <div id="sort-choice-list" class="theme-picker" role="listbox" aria-label="Sort by">
+        <button type="button" class="theme-choice" role="option" data-sort-key="newest">Latest</button>
+        <button type="button" class="theme-choice" role="option" data-sort-key="name">Name</button>
+        <button type="button" class="theme-choice" role="option" data-sort-key="longest">Longest</button>
+        <button type="button" class="theme-choice" role="option" data-sort-key="size">Size</button>
+        <button type="button" class="theme-choice" role="option" data-sort-key="path">Path</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="show-dialog" class="modal-back" hidden>
+    <div class="modal theme-dialog" role="dialog" aria-modal="true" aria-labelledby="show-dialog-title">
+      <div class="theme-dialog-h">
+        <h2 id="show-dialog-title">Show</h2>
+        <button type="button" id="show-dialog-close">Close</button>
+      </div>
+      <div id="show-choice-list" class="theme-picker" role="listbox" aria-label="Watched">
+        <button type="button" class="theme-choice" role="option" data-show-key="all">All</button>
+        <button type="button" class="theme-choice" role="option" data-show-key="unwatched">Unwatched</button>
+        <button type="button" class="theme-choice" role="option" data-show-key="watched">Watched</button>
+      </div>
+    </div>
   </div>
 
   <div id="refresh-wait" class="modal-back" hidden>
@@ -318,24 +351,14 @@
   <main id="view-home" class="page">
     <div id="library-browser">
     <div class="sortbar">
-      <label class="sort-key">
-        <span>Sort</span>
-        <select id="sort-key" aria-label="Sort by">
-          <option value="newest">Latest</option>
-          <option value="name">Name</option>
-          <option value="longest">Longest</option>
-          <option value="size">Size</option>
-          <option value="path">Path</option>
-        </select>
-      </label>
-      <label class="sort-key">
-        <span>Show</span>
-        <select id="watch-filter" aria-label="Watched">
-          <option value="all">All</option>
-          <option value="unwatched">Unwatched</option>
-          <option value="watched">Watched</option>
-        </select>
-      </label>
+      <button type="button" id="sort-open" class="sort-open" aria-haspopup="dialog" aria-expanded="false" aria-controls="sort-dialog">
+        <span class="sort-open-k">Sort</span>
+        <span id="sort-open-value">Latest</span>
+      </button>
+      <button type="button" id="show-open" class="sort-open" aria-haspopup="dialog" aria-expanded="false" aria-controls="show-dialog">
+        <span class="sort-open-k">Show</span>
+        <span id="show-open-value">All</span>
+      </button>
       <button type="button" id="sort-dir" class="sort-dir" aria-label="Sort direction">Latest first</button>
       <button type="button" id="refresh" class="sort-dir" aria-label="Refresh library" title="Check for new movies">Refresh</button>
       <label class="sort-group" id="sort-group" hidden>

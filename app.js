@@ -717,19 +717,66 @@ function saveSort() {
   localStorage.setItem(SORT_STORE, JSON.stringify({ v: 2, key: sortKey, desc: sortDesc, group: groupByFolder }));
 }
 
+const SORT_LABELS = { newest: "Latest", name: "Name", longest: "Longest", size: "Size", path: "Path" };
+const SHOW_LABELS = { all: "All", unwatched: "Unwatched", watched: "Watched" };
+
+function paintChoiceList(root, attr, value) {
+  if (!root) return;
+  root.querySelectorAll("[" + attr + "]").forEach((button) => {
+    button.setAttribute("aria-selected", button.getAttribute(attr) === value ? "true" : "false");
+  });
+}
+
 function syncSortControls() {
-  const select = document.getElementById("sort-key");
   const button = document.getElementById("sort-dir");
-  if (!select || !button) return;
-  select.value = sortKey;
+  const value = document.getElementById("sort-open-value");
+  if (!button || !value) return;
+  value.textContent = SORT_LABELS[sortKey] || "Latest";
+  document.getElementById("sort-open").setAttribute("aria-label", "Sort by " + value.textContent);
   const labels = SORT_DIRS[sortKey];
   button.textContent = labels[sortDesc ? 1 : 0];
+  paintChoiceList(document.getElementById("sort-choice-list"), "data-sort-key", sortKey);
   const group = document.getElementById("sort-group");
   const box = document.getElementById("group-folders");
   if (group && box) {
     group.hidden = sortKey !== "path";
     box.checked = groupByFolder;
   }
+}
+
+function syncShowControls() {
+  const value = document.getElementById("show-open-value");
+  if (!value) return;
+  value.textContent = SHOW_LABELS[watchFilter] || "All";
+  document.getElementById("show-open").setAttribute("aria-label", "Show " + value.textContent);
+  paintChoiceList(document.getElementById("show-choice-list"), "data-show-key", watchFilter);
+}
+
+function closeSortDialog() {
+  const menu = document.getElementById("sort-dialog");
+  const button = document.getElementById("sort-open");
+  const wasOpen = !!(menu && !menu.hidden);
+  if (menu) menu.hidden = true;
+  if (button) button.setAttribute("aria-expanded", "false");
+  if (wasOpen && button && menu.contains(document.activeElement)) button.focus();
+}
+
+function closeShowDialog() {
+  const menu = document.getElementById("show-dialog");
+  const button = document.getElementById("show-open");
+  const wasOpen = !!(menu && !menu.hidden);
+  if (menu) menu.hidden = true;
+  if (button) button.setAttribute("aria-expanded", "false");
+  if (wasOpen && button && menu.contains(document.activeElement)) button.focus();
+}
+
+function openChoiceDialog(menu, button, closeId) {
+  closeThemeMenu();
+  if (menu.id !== "sort-dialog") closeSortDialog();
+  if (menu.id !== "show-dialog") closeShowDialog();
+  menu.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  document.getElementById(closeId).focus();
 }
 
 function folderLabel(item) {
@@ -1764,11 +1811,27 @@ searchInput.addEventListener("input", () => {
 
 loadSort();
 syncSortControls();
-document.getElementById("sort-key").addEventListener("change", (event) => {
-  sortKey = event.target.value;
+document.getElementById("sort-open").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const menu = document.getElementById("sort-dialog");
+  if (!menu.hidden) {
+    closeSortDialog();
+    return;
+  }
+  openChoiceDialog(menu, event.currentTarget, "sort-dialog-close");
+});
+document.getElementById("sort-dialog").addEventListener("click", (event) => {
+  if (event.target.id === "sort-dialog" || event.target.closest("#sort-dialog-close")) {
+    closeSortDialog();
+    return;
+  }
+  const button = event.target.closest("[data-sort-key]");
+  if (!button) return;
+  sortKey = button.dataset.sortKey;
   sortDesc = sortKey === "newest" || sortKey === "longest" || sortKey === "size";
   saveSort();
   syncSortControls();
+  closeSortDialog();
   renderHome();
 });
 document.getElementById("sort-dir").addEventListener("click", () => {
@@ -1784,10 +1847,27 @@ document.getElementById("group-folders").addEventListener("change", (event) => {
 });
 watchFilter = localStorage.getItem(WATCH_FILTER) || "all";
 if (!["all", "unwatched", "watched"].includes(watchFilter)) watchFilter = "all";
-document.getElementById("watch-filter").value = watchFilter;
-document.getElementById("watch-filter").addEventListener("change", (event) => {
-  watchFilter = event.target.value;
+syncShowControls();
+document.getElementById("show-open").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const menu = document.getElementById("show-dialog");
+  if (!menu.hidden) {
+    closeShowDialog();
+    return;
+  }
+  openChoiceDialog(menu, event.currentTarget, "show-dialog-close");
+});
+document.getElementById("show-dialog").addEventListener("click", (event) => {
+  if (event.target.id === "show-dialog" || event.target.closest("#show-dialog-close")) {
+    closeShowDialog();
+    return;
+  }
+  const button = event.target.closest("[data-show-key]");
+  if (!button) return;
+  watchFilter = button.dataset.showKey;
   localStorage.setItem(WATCH_FILTER, watchFilter);
+  syncShowControls();
+  closeShowDialog();
   renderHome();
 });
 mineOnly = localStorage.getItem(MINE_ONLY) === "1";
@@ -2301,6 +2381,24 @@ document.addEventListener("keydown", (event) => {
     searchInput.focus();
     searchInput.select();
     return;
+  }
+  if (event.key === "Escape") {
+    if (!document.getElementById("sort-dialog").hidden) {
+      event.preventDefault();
+      closeSortDialog();
+      return;
+    }
+    if (!document.getElementById("show-dialog").hidden) {
+      event.preventDefault();
+      closeShowDialog();
+      return;
+    }
+    const themeMenu = document.getElementById("player-theme-menu");
+    if (themeMenu && !themeMenu.hidden) {
+      event.preventDefault();
+      closeThemeMenu();
+      return;
+    }
   }
   if (typing || viewWatch.hidden || !current) return;
   if (event.key === "Escape" && upNextTimer) {
@@ -3028,25 +3126,13 @@ const THEME_CHOICES = [
 
 const THEMES = THEME_CHOICES.map((choice) => choice[0]);
 
-function closeThemeSubmenu() {
-  const list = document.getElementById("player-theme-list");
-  const button = document.getElementById("theme-submenu-btn");
-  if (list) {
-    list.hidden = true;
-    list.classList.remove("inline");
-  }
-  if (button) {
-    button.setAttribute("aria-expanded", "false");
-    button.classList.remove("opens-left", "opens-down");
-  }
-}
-
 function closeThemeMenu() {
-  closeThemeSubmenu();
   const menu = document.getElementById("player-theme-menu");
   const button = document.getElementById("player-theme-btn");
+  const wasOpen = !!(menu && !menu.hidden);
   if (menu) menu.hidden = true;
   if (button) button.setAttribute("aria-expanded", "false");
+  if (wasOpen && button && !button.hidden && menu.contains(document.activeElement)) button.focus();
 }
 
 function themeListHTML(includeDefault) {
@@ -3328,54 +3414,7 @@ function placeMenu(menu, anchor) {
   menu.style.top = Math.max(margin, rect.top - gap - Math.min(height, available)) + "px";
 }
 
-function placeThemeSubmenu() {
-  const menu = document.getElementById("player-theme-menu");
-  const anchor = document.getElementById("player-theme-btn");
-  const button = document.getElementById("theme-submenu-btn");
-  const list = document.getElementById("player-theme-list");
-  if (!menu || !button || !list) return;
-  list.hidden = false;
-  list.classList.remove("inline");
-  list.style.maxHeight = "none";
-  list.style.left = "0px";
-  list.style.top = "0px";
-  button.classList.remove("opens-left", "opens-down");
-  button.setAttribute("aria-expanded", "true");
-  placeMenu(menu, anchor);
-  const menuRect = menu.getBoundingClientRect();
-  const buttonRect = button.getBoundingClientRect();
-  const margin = 8;
-  const gap = 6;
-  const width = list.offsetWidth;
-  const height = list.scrollHeight;
-  const spaceLeft = menuRect.left - gap - margin;
-  const spaceRight = window.innerWidth - menuRect.right - gap - margin;
-  if (Math.max(spaceLeft, spaceRight) < 180) {
-    list.classList.add("inline");
-    list.style.left = "";
-    list.style.top = "";
-    list.style.maxHeight = "";
-    button.classList.add("opens-down");
-    placeMenu(menu, anchor);
-    return;
-  }
-  const openLeft = spaceLeft >= spaceRight;
-  const available = Math.max(0, window.innerHeight - margin * 2);
-  list.style.maxHeight = Math.min(height, available) + "px";
-  const used = Math.min(height, available);
-  list.style.top = Math.max(margin, Math.min(buttonRect.top, window.innerHeight - margin - used)) + "px";
-  list.style.left = openLeft
-    ? Math.max(margin, menuRect.left - gap - width) + "px"
-    : Math.min(window.innerWidth - margin - width, menuRect.right + gap) + "px";
-  if (openLeft) button.classList.add("opens-left");
-}
-
 window.addEventListener("resize", () => {
-  const theme = document.getElementById("player-theme-menu");
-  const themeBtn = document.getElementById("player-theme-btn");
-  if (theme && themeBtn && !theme.hidden) placeMenu(theme, themeBtn);
-  const list = document.getElementById("player-theme-list");
-  if (list && !list.hidden) placeThemeSubmenu();
   const account = document.getElementById("account-menu");
   const accountBtn = document.getElementById("account-btn");
   if (account && accountBtn && !account.hidden) placeMenu(account, accountBtn);
@@ -3390,60 +3429,22 @@ document.getElementById("player-theme-btn").addEventListener("click", (event) =>
     return;
   }
   menu.hidden = false;
-  menu.scrollTop = 0;
+  const list = document.getElementById("player-theme-list");
+  if (list) list.scrollTop = 0;
   event.currentTarget.setAttribute("aria-expanded", "true");
-  placeMenu(menu, event.currentTarget);
+  document.getElementById("player-theme-close").focus();
 });
 
 document.getElementById("player-theme-menu").addEventListener("click", (event) => {
+  if (event.target.id === "player-theme-menu" || event.target.closest("#player-theme-close")) {
+    closeThemeMenu();
+    return;
+  }
   const button = event.target.closest("[data-theme-choice]");
   if (!button) return;
   chooseTheme(button.dataset.themeChoice);
   closeThemeMenu();
 });
-
-const themeSubmenuBtn = document.getElementById("theme-submenu-btn");
-const themeSubmenuList = document.getElementById("player-theme-list");
-let themeSubmenuTimer = 0;
-let themeSubmenuOpenedAt = 0;
-const themeSubmenuHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-
-function keepThemeSubmenu() {
-  clearTimeout(themeSubmenuTimer);
-}
-
-function scheduleCloseThemeSubmenu() {
-  clearTimeout(themeSubmenuTimer);
-  themeSubmenuTimer = setTimeout(() => {
-    if (themeSubmenuBtn.matches(":hover") || themeSubmenuList.matches(":hover")) return;
-    closeThemeSubmenu();
-    const menu = document.getElementById("player-theme-menu");
-    if (menu && !menu.hidden) placeMenu(menu, document.getElementById("player-theme-btn"));
-  }, 180);
-}
-
-function showThemeSubmenu() {
-  keepThemeSubmenu();
-  placeThemeSubmenu();
-  themeSubmenuOpenedAt = performance.now();
-}
-
-themeSubmenuBtn.addEventListener("click", (event) => {
-  event.stopPropagation();
-  if (themeSubmenuList.hidden) {
-    showThemeSubmenu();
-    return;
-  }
-  if (!themeSubmenuHover && performance.now() - themeSubmenuOpenedAt > 400) {
-    closeThemeSubmenu();
-    placeMenu(document.getElementById("player-theme-menu"), document.getElementById("player-theme-btn"));
-  }
-});
-
-themeSubmenuBtn.addEventListener("mouseenter", showThemeSubmenu);
-themeSubmenuBtn.addEventListener("mouseleave", scheduleCloseThemeSubmenu);
-themeSubmenuList.addEventListener("mouseenter", keepThemeSubmenu);
-themeSubmenuList.addEventListener("mouseleave", scheduleCloseThemeSubmenu);
 
 document.getElementById("user-theme-picker").addEventListener("click", (event) => {
   const button = event.target.closest("[data-theme-choice]");
