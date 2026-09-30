@@ -2455,6 +2455,10 @@ function renderAccount() {
   const users = document.getElementById("account-users");
   const password = document.getElementById("account-password");
   const logout = document.getElementById("account-logout");
+  const showTheme = videoPlayer || !me;
+  document.getElementById("player-theme-btn").hidden = !showTheme;
+  button.hidden = videoPlayer;
+  if (!showTheme) closeThemeMenu();
   if (!me) {
     button.textContent = "Sign in";
     upload.hidden = true;
@@ -2483,8 +2487,9 @@ async function loadMe() {
   const data = await response.json();
   videoPlayer = !!data.videoPlayer;
   me = data.user || null;
-  document.getElementById("player-theme-btn").hidden = !videoPlayer;
-  document.getElementById("account-btn").hidden = videoPlayer;
+  document.querySelectorAll("[data-app-version]").forEach((el) => {
+    el.textContent = data.version ? "gomoov " + data.version : "";
+  });
   renderAccount();
 }
 
@@ -2641,13 +2646,9 @@ document.getElementById("account-btn").addEventListener("click", (event) => {
   }
   closeThemeMenu();
   menu.hidden = false;
+  menu.scrollTop = 0;
   document.getElementById("account-btn").setAttribute("aria-expanded", "true");
-  const rect = document.getElementById("account-btn").getBoundingClientRect();
-  menu.style.left = "0px";
-  menu.style.top = "0px";
-  const width = menu.offsetWidth;
-  menu.style.left = Math.max(8, rect.right - width) + "px";
-  menu.style.top = (rect.bottom + 6) + "px";
+  placeMenu(menu, document.getElementById("account-btn"));
 });
 
 document.getElementById("account-mine").addEventListener("click", () => {
@@ -3020,12 +3021,28 @@ const THEME_CHOICES = [
   ["ocean", "Ocean"],
   ["sunset", "Sunset"],
   ["amber", "Amber"],
-  ["lavender", "Lavender"]
+  ["lavender", "Lavender"],
+  ["rose", "Rose"],
+  ["steel", "Steel"]
 ];
 
 const THEMES = THEME_CHOICES.map((choice) => choice[0]);
 
+function closeThemeSubmenu() {
+  const list = document.getElementById("player-theme-list");
+  const button = document.getElementById("theme-submenu-btn");
+  if (list) {
+    list.hidden = true;
+    list.classList.remove("inline");
+  }
+  if (button) {
+    button.setAttribute("aria-expanded", "false");
+    button.classList.remove("opens-left", "opens-down");
+  }
+}
+
 function closeThemeMenu() {
+  closeThemeSubmenu();
   const menu = document.getElementById("player-theme-menu");
   const button = document.getElementById("player-theme-btn");
   if (menu) menu.hidden = true;
@@ -3291,14 +3308,78 @@ renderThemeMenus();
 
 function placeMenu(menu, anchor) {
   const rect = anchor.getBoundingClientRect();
+  const margin = 8;
+  const gap = 6;
+  menu.style.maxHeight = "none";
   menu.style.left = "0px";
   menu.style.top = "0px";
   const width = menu.offsetWidth;
-  const height = menu.offsetHeight;
-  menu.style.left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)) + "px";
-  const below = rect.bottom + 6;
-  menu.style.top = (below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 8) : below) + "px";
+  const height = menu.scrollHeight;
+  const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
+  const spaceAbove = rect.top - gap - margin;
+  const openBelow = spaceBelow >= height || spaceBelow >= spaceAbove;
+  const available = Math.max(0, Math.floor(openBelow ? spaceBelow : spaceAbove));
+  menu.style.maxHeight = available + "px";
+  menu.style.left = Math.max(margin, Math.min(rect.right - width, window.innerWidth - width - margin)) + "px";
+  if (openBelow) {
+    menu.style.top = (rect.bottom + gap) + "px";
+    return;
+  }
+  menu.style.top = Math.max(margin, rect.top - gap - Math.min(height, available)) + "px";
 }
+
+function placeThemeSubmenu() {
+  const menu = document.getElementById("player-theme-menu");
+  const anchor = document.getElementById("player-theme-btn");
+  const button = document.getElementById("theme-submenu-btn");
+  const list = document.getElementById("player-theme-list");
+  if (!menu || !button || !list) return;
+  list.hidden = false;
+  list.classList.remove("inline");
+  list.style.maxHeight = "none";
+  list.style.left = "0px";
+  list.style.top = "0px";
+  button.classList.remove("opens-left", "opens-down");
+  button.setAttribute("aria-expanded", "true");
+  placeMenu(menu, anchor);
+  const menuRect = menu.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+  const margin = 8;
+  const gap = 6;
+  const width = list.offsetWidth;
+  const height = list.scrollHeight;
+  const spaceLeft = menuRect.left - gap - margin;
+  const spaceRight = window.innerWidth - menuRect.right - gap - margin;
+  if (Math.max(spaceLeft, spaceRight) < 180) {
+    list.classList.add("inline");
+    list.style.left = "";
+    list.style.top = "";
+    list.style.maxHeight = "";
+    button.classList.add("opens-down");
+    placeMenu(menu, anchor);
+    return;
+  }
+  const openLeft = spaceLeft >= spaceRight;
+  const available = Math.max(0, window.innerHeight - margin * 2);
+  list.style.maxHeight = Math.min(height, available) + "px";
+  const used = Math.min(height, available);
+  list.style.top = Math.max(margin, Math.min(buttonRect.top, window.innerHeight - margin - used)) + "px";
+  list.style.left = openLeft
+    ? Math.max(margin, menuRect.left - gap - width) + "px"
+    : Math.min(window.innerWidth - margin - width, menuRect.right + gap) + "px";
+  if (openLeft) button.classList.add("opens-left");
+}
+
+window.addEventListener("resize", () => {
+  const theme = document.getElementById("player-theme-menu");
+  const themeBtn = document.getElementById("player-theme-btn");
+  if (theme && themeBtn && !theme.hidden) placeMenu(theme, themeBtn);
+  const list = document.getElementById("player-theme-list");
+  if (list && !list.hidden) placeThemeSubmenu();
+  const account = document.getElementById("account-menu");
+  const accountBtn = document.getElementById("account-btn");
+  if (account && accountBtn && !account.hidden) placeMenu(account, accountBtn);
+});
 
 document.getElementById("player-theme-btn").addEventListener("click", (event) => {
   event.stopPropagation();
@@ -3309,6 +3390,7 @@ document.getElementById("player-theme-btn").addEventListener("click", (event) =>
     return;
   }
   menu.hidden = false;
+  menu.scrollTop = 0;
   event.currentTarget.setAttribute("aria-expanded", "true");
   placeMenu(menu, event.currentTarget);
 });
@@ -3319,6 +3401,49 @@ document.getElementById("player-theme-menu").addEventListener("click", (event) =
   chooseTheme(button.dataset.themeChoice);
   closeThemeMenu();
 });
+
+const themeSubmenuBtn = document.getElementById("theme-submenu-btn");
+const themeSubmenuList = document.getElementById("player-theme-list");
+let themeSubmenuTimer = 0;
+let themeSubmenuOpenedAt = 0;
+const themeSubmenuHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+function keepThemeSubmenu() {
+  clearTimeout(themeSubmenuTimer);
+}
+
+function scheduleCloseThemeSubmenu() {
+  clearTimeout(themeSubmenuTimer);
+  themeSubmenuTimer = setTimeout(() => {
+    if (themeSubmenuBtn.matches(":hover") || themeSubmenuList.matches(":hover")) return;
+    closeThemeSubmenu();
+    const menu = document.getElementById("player-theme-menu");
+    if (menu && !menu.hidden) placeMenu(menu, document.getElementById("player-theme-btn"));
+  }, 180);
+}
+
+function showThemeSubmenu() {
+  keepThemeSubmenu();
+  placeThemeSubmenu();
+  themeSubmenuOpenedAt = performance.now();
+}
+
+themeSubmenuBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (themeSubmenuList.hidden) {
+    showThemeSubmenu();
+    return;
+  }
+  if (!themeSubmenuHover && performance.now() - themeSubmenuOpenedAt > 400) {
+    closeThemeSubmenu();
+    placeMenu(document.getElementById("player-theme-menu"), document.getElementById("player-theme-btn"));
+  }
+});
+
+themeSubmenuBtn.addEventListener("mouseenter", showThemeSubmenu);
+themeSubmenuBtn.addEventListener("mouseleave", scheduleCloseThemeSubmenu);
+themeSubmenuList.addEventListener("mouseenter", keepThemeSubmenu);
+themeSubmenuList.addEventListener("mouseleave", scheduleCloseThemeSubmenu);
 
 document.getElementById("user-theme-picker").addEventListener("click", (event) => {
   const button = event.target.closest("[data-theme-choice]");

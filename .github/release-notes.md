@@ -1,4 +1,4 @@
-Without accounts, the header menu icon opens Theme and the theme list. The choice stays in the browser. Settings and Admin use the same list. The selected row, and the row under the pointer, use that theme's own colors. Amber and Lavender are new themes. In Cyber green, section titles such as Continue watching and Library are phosphor green, while movie names keep their color.
+The header menu icon opens Theme and About. Theme opens the theme list as a submenu. The row under the pointer uses that theme's own colors, and the list scrolls when the window is short. Without accounts, the choice stays in the browser. With accounts, that menu sits next to Sign in until you sign in. Settings and Admin keep the full list. Rose and Steel join Amber and Lavender. About shows this version and a link to the repository. In Cyber green, section titles such as Continue watching and Library are phosphor green, while movie names keep their color.
 
 Posters skip a black or solid-color opening frame, so a title that starts dark still gets a thumbnail. `go install github.com/mmpx12/gomoov@latest` installs this version. The module path matches the repository.
 

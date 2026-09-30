@@ -517,7 +517,7 @@ func publicUser(u userRecord, adminView bool) map[string]any {
 }
 
 func mePayload(u *userRecord) map[string]any {
-	out := map[string]any{"user": nil, "videoPlayer": videoPlayer, "theme": currentSettings().Theme}
+	out := map[string]any{"user": nil, "videoPlayer": videoPlayer, "theme": currentSettings().Theme, "version": version}
 	if u == nil {
 		return out
 	}
